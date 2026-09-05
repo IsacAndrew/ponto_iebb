@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: livro-ponto
+    runtime: docker
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: BOOTSTRAP_LOGIN
+        value: suporte
+      - key: BOOTSTRAP_PASSWORD
+        sync: false
+      - key: SUPPORT_TEST_BYPASS
+        value: "false"
