@@ -340,14 +340,25 @@ def test_support_location_exception_is_per_account_and_audited(client):
         assert c.post('/api/punch',json={'key':uuid.uuid4().hex}).status_code==422
     assert any(a['action']=='Alterar exigência de localização própria' for a in client.get('/api/audit?month=2026-09').json())
 
-def test_subjects_grade_uses_schedule_and_storage(client):
-    pid=add_person(login='teacher');set_schedule(pid,[['07:30','11:00'],['12:00','17:30']])
-    subjects={'2º Ano A':['Matemática','Artes'],'3º Ano A':['Matemática']}
+def test_grade_times_are_manual_and_do_not_change_schedule(client,monkeypatch):
+    pid=add_person(login='teacher');set_schedule(pid,[['07:10','08:50'],['09:10','12:30']])
+    subjects={'1º Ano A':['Matemática'],'2º Ano A':['Matemática'],'3º Ano A':['Artes'],'4º Ano A':['Artes'],'5º Ano A':['Português']}
     result=client.put(f'/api/people/{pid}/subjects',json={'subjects':subjects})
     assert result.status_code==200 and result.json()['subjects']==subjects
-    lesson={'day':'3','start':'07:30','end':'11:00','class':'2º Ano A','subject':'Artes'}
-    assert client.put(f'/api/people/{pid}/lessons',json={'lessons':[lesson]}).status_code==200
-    invalid={**lesson,'subject':'Português'}
+    lessons=[
+        {'day':'0','start':'07:10','end':'08:00','class':'1º Ano A','subject':'Matemática'},
+        {'day':'0','start':'08:00','end':'08:50','class':'2º Ano A','subject':'Matemática'},
+        {'day':'0','start':'09:10','end':'10:00','class':'3º Ano A','subject':'Artes'},
+        {'day':'0','start':'10:00','end':'10:50','class':'4º Ano A','subject':'Artes'},
+        {'day':'0','start':'10:50','end':'11:40','class':'5º Ano A','subject':'Português'},
+    ]
+    assert client.put(f'/api/people/{pid}/lessons',json={'lessons':lessons}).status_code==200
+    invalid={**lessons[0],'end':'07:00'}
     assert client.put(f'/api/people/{pid}/lessons',json={'lessons':[invalid]}).status_code==400
+    at(monkeypatch,'2026-09-07T07:10:00')
+    with TestClient(app) as teacher:
+        teacher.headers['X-Ponto']='1';teacher.post('/api/login',json={'login':'teacher','password':'definitiva1'})
+        point=teacher.get('/api/punch/today').json()
+        assert point['periods']==[['07:10','08:50'],['09:10','12:30']] and point['expected']==4
     storage=client.get('/api/system/storage')
     assert storage.status_code==200 and storage.json()['used_bytes']>0 and storage.json()['limit_bytes']>0

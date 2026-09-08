@@ -325,10 +325,11 @@ def lessons(pid:int,request: Request,data: dict=Body(...)):
         actor=current(db,request); require(actor,ADMIN); p=db.get(Person,pid)
         if not p or p.role!='Professor': fail('Selecione um professor.')
         rows=data.get('lessons',[]); subjects=p.details.get('subjects_by_class',{})
-        active_schedule=db.scalar(select(Schedule).where(Schedule.person_id==pid,Schedule.specific==False).order_by(Schedule.effective.desc(),Schedule.id.desc()))
         for row in rows:
-            day=str(row.get('day')); pair=[row.get('start'),row.get('end')]
-            if row.get('class') not in CLASSES or day not in list(map(str,range(7))) or row.get('subject') not in subjects.get(row.get('class'),[]) or not active_schedule or pair not in active_schedule.days.get(day,[]): fail('A grade deve usar uma matéria cadastrada e um horário da jornada.')
+            day=str(row.get('day'))
+            try: valid_time=minutes(row.get('start'))<minutes(row.get('end'))
+            except Exception: valid_time=False
+            if row.get('class') not in CLASSES or day not in list(map(str,range(7))) or row.get('subject') not in subjects.get(row.get('class'),[]) or not valid_time: fail('Confira dia, horário, Turma e Matéria da aula.')
         before=p.details; p.details={**p.details,'lessons':rows}
         audit(db,actor,'Alterar grade pedagógica',pid,before,p.details); return {'ok':True}
 
