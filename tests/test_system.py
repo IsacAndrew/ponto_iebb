@@ -345,3 +345,15 @@ def test_support_location_exception_is_per_account_and_audited(client):
         assert c.get('/api/support/my-location').json()=={'required':True}
         assert c.post('/api/punch',json={'key':uuid.uuid4().hex}).status_code==422
     assert any(a['action']=='Alterar exigência de localização própria' for a in client.get('/api/audit?month=2026-09').json())
+
+def test_subjects_grade_uses_schedule_and_storage(client):
+    pid=add_person(login='teacher');set_schedule(pid,[['07:30','11:00'],['12:00','17:30']])
+    subjects={'2º Ano A':['Matemática','Artes'],'3º Ano A':['Matemática']}
+    result=client.put(f'/api/people/{pid}/subjects',json={'subjects':subjects})
+    assert result.status_code==200 and result.json()['subjects']==subjects
+    lesson={'day':'3','start':'07:30','end':'11:00','class':'2º Ano A','subject':'Artes'}
+    assert client.put(f'/api/people/{pid}/lessons',json={'lessons':[lesson]}).status_code==200
+    invalid={**lesson,'subject':'Português'}
+    assert client.put(f'/api/people/{pid}/lessons',json={'lessons':[invalid]}).status_code==400
+    storage=client.get('/api/system/storage')
+    assert storage.status_code==200 and storage.json()['used_bytes']>0 and storage.json()['limit_bytes']>0

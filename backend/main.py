@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response, Body
 from fastapi.responses import FileResponse, JSONResponse, Response as RawResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from .db import ROOT, init, transaction, reading, Person, Schedule, Day, Item, Setting, Audit, audit, now, today
 from .rules import ROLES, ADMIN, CLASSES, fail, minutes, valid_date, validate_days, schedule_for, holiday, unlocked, get_day, summarize, distance, suspect_missing
@@ -272,7 +272,7 @@ def update_person(pid:int,request: Request,data: dict=Body(...)):
         if actor.id==pid and role!=p.role: fail('Você não pode alterar o próprio perfil de acesso.')
         if db.scalar(select(Person.id).where(Person.login==login,Person.id!=pid)): fail('Este login já está em uso.')
         before=person_data(p)
-        for key in ('lessons','punch_labels','punch_messages'):
+        for key in ('lessons','subjects_by_class','punch_labels','punch_messages'):
             if key in p.details: details[key]=p.details[key]
         p.name,p.login,p.role,p.details,p.hired=name,login,role,details,valid_date(data.get('hired',p.hired))
         if before['role']!=role: p.session={}
@@ -324,11 +324,30 @@ def lessons(pid:int,request: Request,data: dict=Body(...)):
     with transaction() as db:
         actor=current(db,request); require(actor,ADMIN); p=db.get(Person,pid)
         if not p or p.role!='Professor': fail('Selecione um professor.')
-        rows=data.get('lessons',[])
+        rows=data.get('lessons',[]); subjects=p.details.get('subjects_by_class',{})
+        active_schedule=db.scalar(select(Schedule).where(Schedule.person_id==pid,Schedule.specific==False).order_by(Schedule.effective.desc(),Schedule.id.desc()))
         for row in rows:
-            if row.get('class') not in CLASSES or str(row.get('day')) not in list(map(str,range(7))) or not row.get('subject') or minutes(row['start'])>=minutes(row['end']): fail('Confira os dados da aula.')
+            day=str(row.get('day')); pair=[row.get('start'),row.get('end')]
+            if row.get('class') not in CLASSES or day not in list(map(str,range(7))) or row.get('subject') not in subjects.get(row.get('class'),[]) or not active_schedule or pair not in active_schedule.days.get(day,[]): fail('A grade deve usar uma matéria cadastrada e um horário da jornada.')
         before=p.details; p.details={**p.details,'lessons':rows}
         audit(db,actor,'Alterar grade pedagógica',pid,before,p.details); return {'ok':True}
+
+@app.put('/api/people/{pid}/subjects')
+def subjects(pid:int,request:Request,data:dict=Body(...)):
+    with transaction() as db:
+        actor=current(db,request); require(actor,ADMIN); person=db.get(Person,pid)
+        if not person or person.role!='Professor': fail('Selecione um professor.')
+        result={}
+        for classroom,values in data.get('subjects',{}).items():
+            if classroom not in CLASSES: fail('Confira a turma.')
+            clean=[]
+            for value in values:
+                subject=str(value).strip()[:80]
+                if subject and subject not in clean: clean.append(subject)
+            if clean: result[classroom]=clean
+        before=person.details; person.details={**person.details,'subjects_by_class':result}
+        audit(db,actor,'Alterar matérias do professor',pid,before,person.details)
+        return {'subjects':result}
 
 @app.get('/api/records')
 def records(request: Request,start:str,end:str,person_id:int|None=None):
@@ -532,7 +551,7 @@ def settings(request:Request):
 @app.put('/api/support/settings')
 def save_settings(request:Request,data:dict=Body(...)):
     with transaction() as db:
-        actor=current(db,request); require(actor,FULL_ACCESS); confirm(actor,data.get('password',''))
+        actor=current(db,request); require(actor,FULL_ACCESS)
         try: lat,lon,accuracy=float(data['lat']),float(data['lon']),float(data['accuracy'])
         except (KeyError,ValueError,TypeError): fail('Confira as coordenadas e a precisão.')
         if not all(math.isfinite(v) for v in [lat,lon,accuracy]) or not -90<=lat<=90 or not -180<=lon<=180 or not 1<=accuracy<=100: fail('Confira as coordenadas e a precisão máxima (1 a 100 m).')
@@ -542,6 +561,17 @@ def save_settings(request:Request,data:dict=Body(...)):
         row.data={'lat':lat,'lon':lon,'accuracy':accuracy,'verified':data.get('verified',before.get('verified',False)) is True}
         audit(db,actor,'Configurar localização','geo',before,row.data,'Confirmação do Suporte')
         return row.data
+
+@app.get('/api/system/storage')
+def storage(request:Request):
+    with reading() as db:
+        require(current(db,request),FULL_ACCESS)
+        if db.bind.dialect.name=='postgresql':
+            used=int(db.execute(text('SELECT pg_database_size(current_database())')).scalar_one())
+        else:
+            path=Path(db.bind.url.database); used=path.stat().st_size if path.exists() else 0
+        limit=max(1,int(os.getenv('DB_STORAGE_LIMIT_MB','500')))*1024*1024
+        return {'used_bytes':used,'limit_bytes':limit,'percent':round(min(100,used*100/limit),2)}
 @app.get('/api/month/{month}')
 def month_status(month:str,request:Request):
     valid_date(month+'-01')

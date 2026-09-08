@@ -1,8 +1,8 @@
 import React,{useState,useEffect,useRef} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Clock3,History,Users,FileSpreadsheet,ClipboardCheck,LifeBuoy,UserRound,LogOut,Menu,ShieldCheck,Check,MapPin,ArrowRight,Settings,Search} from 'lucide-react';
+import {Clock3,History,Users,FileSpreadsheet,ClipboardCheck,LifeBuoy,UserRound,LogOut,Menu,ShieldCheck,Check,MapPin,ArrowRight,Settings,Search,Fingerprint} from 'lucide-react';
 import {api,Field,Password,Button,Modal,Notice,dateNow,hours} from './ui';
-import {People} from './people';
+import {People,preloadPeople} from './people';
 import {Records,Management,Requests,Reports,Support,Profile,Chat,SettingsPage} from './pages';
 import {QRAccess} from './qr';
 import './style.css';
@@ -20,10 +20,11 @@ function App(){
  const ctx={me,run,busy,notify,refresh};
  const change=p=>{setPage(p);setError('');setNav(false);if(me?.temporary&&!passwordPrompt){navCount.current++;if(navCount.current>=2){navCount.current=0;setPasswordPrompt(true);}}};
  useEffect(()=>{if(me?.temporary)setPasswordPrompt(true);else setPasswordPrompt(false)},[me?.id,me?.temporary]);
+ useEffect(()=>{if(me&&['Administração','Diretoria','Suporte'].includes(me.role))preloadPeople().catch(()=>{});},[me?.id]);
  if(loading)return <div className="login-shell">Carregando…</div>;
  if(!me)return <><Login notify={notify} onLogin={p=>{generation.current++;setMe(p);setPage(p.role==='Diretoria'?'Usuários':'Ponto');}} run={run} busy={busy}/>{error&&<div className="toast error" role="alert">{error}<button onClick={()=>setError('')}>×</button></div>}</>;
  const admin=['Administração','Diretoria','Suporte'].includes(me.role);
- const links=[[['Ponto',null],['Meus Registros',History],['Meu Perfil',UserRound]],...(admin?[[['Usuários',Users],['Marcações',Search],['Excel',FileSpreadsheet]]]:[]),...(['Suporte','Diretoria'].includes(me.role)?[[['Solicitações',ClipboardCheck]]]:[]),...(me.role==='Suporte'?[[['Central de Suporte',ShieldCheck],['Atendimentos',LifeBuoy]]]:[]),...(me.role!=='Suporte'?[[['Falar com Suporte',LifeBuoy]]]:[]),...(['Suporte','Diretoria'].includes(me.role)?[[['Configurações',Settings]]]:[])];
+ const links=[[['Ponto',Fingerprint],['Meus Registros',History],['Meu Perfil',UserRound]],...(admin?[[['Usuários',Users],['Marcações',Search],['Excel',FileSpreadsheet],...(['Suporte','Diretoria'].includes(me.role)?[['Solicitações',ClipboardCheck]]:[]),...(me.role==='Suporte'?[['Atendimentos',LifeBuoy],['Central de Suporte',ShieldCheck]]:[])]]:[]),...(me.role!=='Suporte'?[[['Falar com Suporte',LifeBuoy]]]:[]),...(['Suporte','Diretoria'].includes(me.role)?[[['Configurações',Settings]]]:[])];
  return <div className="app"><aside className={nav?'sidebar open':'sidebar'}><div className="brand"><strong>Olá, {me.name.trim().split(/\s+/)[0]}</strong></div><nav>{links.map((group,g)=><React.Fragment key={g}>{g>0&&<hr/>}{group.map(([name,Icon])=><button key={name} className={page===name?'selected':''} onClick={()=>change(name)}>{Icon&&<Icon size={20}/>} {name}</button>)}</React.Fragment>)}</nav><div className="account"><span className="avatar">{me.name[0]}</span><div><strong>{me.name.split(' ')[0]}</strong><span>{me.role}</span></div><button className="icon" title="Sair" onClick={()=>run(async()=>{await api('/logout',{});generation.current++;setMe(null);})}><LogOut size={19}/></button></div></aside>{nav&&<button className="nav-shade" aria-label="Fechar menu" onClick={()=>setNav(false)}/>}
  <main className={page==='Excel'?'report-page':''}><header className={`page-head ${['Ponto','Meus Registros'].includes(page)?'titleless':''}`}><button className="mobile icon" aria-label="Abrir menu" onClick={()=>setNav(true)}><Menu/></button>{!['Ponto','Meus Registros'].includes(page)&&<h1>{page}</h1>}</header>{error&&<div className="inline-error" role="alert">{error}<button onClick={()=>setError('')}>×</button></div>}
  {page==='Ponto'&&<Punch {...ctx}/>}{page==='Usuários'&&admin&&<People {...ctx}/>}{page==='Meus Registros'&&<Records key={page} {...ctx} administrative={false}/>} {page==='Marcações'&&admin&&<Management {...ctx}/>}{page==='Solicitações'&&<Requests {...ctx} admin={admin}/>}{page==='Excel'&&admin&&<Reports {...ctx}/>}{page==='Central de Suporte'&&me.role==='Suporte'&&<Support {...ctx}/>} {page==='Atendimentos'&&me.role==='Suporte'&&<Chat {...ctx} management/>} {page==='Meu Perfil'&&<Profile {...ctx}/>} {page==='Configurações'&&['Suporte','Diretoria'].includes(me.role)&&<SettingsPage {...ctx}/>}{page==='Falar com Suporte'&&me.role!=='Suporte'&&<Chat {...ctx}/>}
