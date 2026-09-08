@@ -21,7 +21,6 @@ def current(db, request: Request, allow_temporary=False):
     if not person or not person.active: fail('Entre novamente.',401)
     state=person.session or {}
     if not hmac.compare_digest(state.get('token',''),digest(token)) or state.get('expires',0)<time.time(): fail('Entre novamente.',401)
-    if person.temporary and not allow_temporary: fail('Crie sua senha definitiva.',403)
     return person
 def require(person, roles):
     if person.role not in roles: fail('Você não tem acesso a esta ação.',403)

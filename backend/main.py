@@ -1,4 +1,5 @@
-import os, time, secrets, json, math, base64, logging, traceback, io
+import os, time, secrets, json, math, base64, logging, traceback, io, smtplib, string, ssl
+from email.message import EmailMessage
 from datetime import date, timedelta
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -47,6 +48,42 @@ async def protection(request, call_next):
 
 @app.api_route('/health',methods=['GET','HEAD'])
 def health(): return {'status':'ok'}
+RECOVERY_RESPONSE={'message':'Se o login estiver cadastrado e possuir e-mail, uma credencial temporária será enviada.'}
+def send_recovery(email,credential):
+    host=os.getenv('SMTP_HOST','').strip(); user=os.getenv('SMTP_USER','').strip(); password=os.getenv('SMTP_PASSWORD',''); sender=os.getenv('SMTP_FROM','').strip()
+    if not host or not sender: raise RuntimeError('SMTP não configurado')
+    port=int(os.getenv('SMTP_PORT','587')); message=EmailMessage(); message['From']=sender; message['To']=email; message['Subject']='Credencial temporária'; message.set_content(f'{credential}\n\nVálida por 5 minutos.')
+    with smtplib.SMTP(host,port,timeout=15) as smtp:
+        if os.getenv('SMTP_USE_TLS','true').lower()=='true': smtp.starttls(context=ssl.create_default_context())
+        if user: smtp.login(user,password)
+        smtp.send_message(message)
+@app.post('/api/recover')
+def recover(data:dict=Body(...)):
+    login_name=str(data.get('login','')).strip().lower()
+    if not login_name: fail('Preencha o login primeiro.')
+    person_id=email=None; rate_key='recover-rate:'+digest(login_name)
+    with transaction() as db:
+        rate=db.get(Setting,rate_key)
+        if rate and rate.data.get('until',0)>time.time(): return RECOVERY_RESPONSE
+        if rate: rate.data={'until':time.time()+60}
+        else: db.add(Setting(key=rate_key,data={'until':time.time()+60}))
+        person=db.scalar(select(Person).where(Person.login==login_name,Person.active==True))
+        if person: person_id=person.id; email=str(person.details.get('email','')).strip()
+    if not person_id or not email: return RECOVERY_RESPONSE
+    credential=''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(8))
+    try: send_recovery(email,credential)
+    except Exception as exc:
+        logging.getLogger('ponto').error('Falha SMTP na recuperação: %s',type(exc).__name__)
+        with transaction() as db:
+            rate=db.get(Setting,rate_key)
+            if rate: db.delete(rate)
+        fail('Não foi possível concluir a recuperação agora. Tente novamente mais tarde.',503)
+    with transaction() as db:
+        row=db.get(Setting,f'recovery:{person_id}'); value={'hash':digest(credential),'expires':time.time()+300,'used':False}
+        if row: row.data=value
+        else: db.add(Setting(key=f'recovery:{person_id}',data=value))
+    return RECOVERY_RESPONSE
+
 @app.post('/api/login')
 def login(request: Request, response: Response, data: dict=Body(...)):
     result=None
@@ -57,12 +94,18 @@ def login(request: Request, response: Response, data: dict=Body(...)):
         attempts=dict(rate.data)
         if attempts.get('until',0)>time.time(): return JSONResponse({'detail':'Muitas tentativas. Aguarde um minuto.'},status_code=429)
         person=db.scalar(select(Person).where(Person.login==name,Person.active==True))
-        if not person or not verify(str(data.get('password','')),person.password):
+        supplied=str(data.get('password',''))
+        recovery=db.get(Setting,f'recovery:{person.id}') if person else None
+        recovery_ok=bool(recovery and recovery.data.get('expires',0)>=time.time() and not recovery.data.get('used') and secrets.compare_digest(recovery.data.get('hash',''),digest(supplied)))
+        password_ok=bool(person and verify(supplied,person.password))
+        if not person or not (password_ok or recovery_ok):
             n=attempts.get('count',0)+1
             rate.data={'count':n if n<5 else 0,'until':time.time()+60 if n>=5 else 0}
             result=JSONResponse({'detail':'Login ou senha incorretos.'},status_code=401)
         else:
             rate.data={}
+            if recovery_ok:
+                recovery.data={**recovery.data,'used':True}; person.temporary=True
             state=person.session or {}
             previous=request.cookies.get('ponto_session','')
             same=previous and digest(previous)==state.get('token') and state.get('expires',0)>time.time()
@@ -75,7 +118,7 @@ def login(request: Request, response: Response, data: dict=Body(...)):
 def me(request: Request):
     with reading() as db:
         person=current(db,request,True)
-        return {'user':public(person),'now':now().isoformat(),'test_bypass':bypass(person)}
+        return {'user':public(person),'now':now().isoformat(),'location_required':location_required(db,person)}
 @app.post('/api/logout')
 def logout(request: Request,response: Response):
     with transaction() as db:
@@ -85,9 +128,10 @@ def logout(request: Request,response: Response):
 @app.post('/api/password')
 def password(request: Request,data: dict=Body(...)):
     with transaction() as db:
-        person=current(db,request,True); confirm(person,data.get('current',''))
+        person=current(db,request,True)
+        if not person.temporary: confirm(person,data.get('current',''))
         value=str(data.get('password',''))
-        if len(value)<8 or len(value)>128 or value=='102030': fail('Use uma senha definitiva com 8 a 128 caracteres.')
+        if len(value)<4 or len(value)>128 or value=='102030': fail('Use uma senha definitiva com 4 a 128 caracteres.')
         person.password=password_hash(value); person.temporary=False
         person.session={k:v for k,v in person.session.items() if k not in ('pending','deadline')}
         audit(db,person,'Senha alterada',person.id)
@@ -98,8 +142,9 @@ def reveal(request: Request,data: dict=Body(...)):
         person=current(db,request); confirm(person,data.get('password',''))
         return {'login':person.login}
 
-def bypass(person):
-    return not os.getenv('RENDER') and os.getenv('SUPPORT_TEST_BYPASS','false').lower()=='true' and person.role=='Suporte' and person.login==os.getenv('BOOTSTRAP_LOGIN','suporte')
+def location_required(db,person):
+    row=db.get(Setting,f'geo-required:{person.id}') if person.role=='Suporte' else None
+    return row is None or row.data.get('required') is not False
 def occurrence(db,person,day,title,details=None):
     for existing in db.scalars(select(Item).where(Item.kind=='occurrence',Item.person_id==person.id,Item.date==day,Item.status=='Pendente')):
         if existing.data.get('title')==title: return
@@ -108,7 +153,7 @@ def occurrence(db,person,day,title,details=None):
 def punch_today(request: Request):
     with reading() as db:
         p=current(db,request)
-        return {**summarize(db,p,today()),'now':now().isoformat(),'test_bypass':bypass(p),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
+        return {**summarize(db,p,today()),'now':now().isoformat(),'location_required':location_required(db,p),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
 def process_punch(db,p,data,source='site'):
     if p.role=='Diretoria': fail('Este perfil não tem jornada obrigatória.')
     d=today(); unlocked(db,d)
@@ -129,11 +174,12 @@ def process_punch(db,p,data,source='site'):
     unusual=not extra and suspect_missing(expected,index,minute)
     if unusual and data.get('forgot') not in ('yes','no'):
         return {'question':'forgot','message':'Você esqueceu a marcação anterior?'}
-    test=bypass(p) and data.get('test') is True
+    test=False
+    required=location_required(db,p)
     geo_row=db.get(Setting,'geo')
     geo=geo_row.data if geo_row else {}
     location={}
-    if not test:
+    if required:
         if geo.get('verified') is not True: fail('A escola ainda precisa confirmar o local de registro. Procure a Diretoria ou o Suporte.',409)
         try: lat,lon,accuracy=[float(data[k]) for k in ('lat','lon','accuracy')]
         except (KeyError,ValueError,TypeError): fail('Permita a localização para registrar o ponto.',422)
@@ -150,7 +196,7 @@ def process_punch(db,p,data,source='site'):
     summary=summarize(db,p,d)
     if extra or summary['extra']>0:
         row.overtime='Pendente de validação'; occurrence(db,p,d,'Hora extra pendente')
-    audit(db,p,'Registrar ponto',row.key,after={'time':punches[-1]['time'],'test':test,'source':source})
+    audit(db,p,'Registrar ponto',row.key,after={'time':punches[-1]['time'],'location_required':required,'source':source})
     message='Ponto registrado com sucesso'
     if row.absent: message+='. Havia falta registrada. Procure o Suporte.'
     elif not extra and index%2==0 and minute-minutes(expected[index])>65: message+='. Atraso elevado: procure o Suporte.'
@@ -180,7 +226,7 @@ def qr_state(token:str):
     with reading() as db:
         p=qr_person(db,token); summary=summarize(db,p,today())
         labels=button_labels(p,summary['periods']); index=len(summary['punches'])
-        return {'name':p.name.split()[0],'now':now().isoformat(),'day':summary,'labels':labels,'can_register':bool(labels),'next':labels[index] if index<len(labels) else ('Registrar hora extra' if labels else 'Sem jornada hoje')}
+        return {'name':p.name.split()[0],'now':now().isoformat(),'day':summary,'labels':labels,'can_register':bool(labels),'location_required':location_required(db,p),'next':labels[index] if index<len(labels) else ('Registrar hora extra' if labels else 'Sem jornada hoje')}
 
 @app.post('/api/qr/{token}/punch')
 def qr_punch(token:str,data:dict=Body(...)):
@@ -590,6 +636,19 @@ def save_labels(pid:int,request:Request,data:dict=Body(...)):
         labels=[str(x).strip()[:80] for x in data.get('labels',[])]; messages=[str(x).strip()[:120] for x in data.get('messages',[])]
         before=person.details; person.details={**person.details,'punch_labels':labels,'punch_messages':messages}
         audit(db,actor,'Alterar rótulos das marcações',pid,before,person.details); return {'ok':True}
+@app.get('/api/support/my-location')
+def my_location(request:Request):
+    with reading() as db:
+        actor=current(db,request); require(actor,['Suporte'])
+        return {'required':location_required(db,actor)}
+@app.put('/api/support/my-location')
+def save_my_location(request:Request,data:dict=Body(...)):
+    with transaction() as db:
+        actor=current(db,request); require(actor,['Suporte']); required=data.get('required') is not False; key=f'geo-required:{actor.id}'; row=db.get(Setting,key); before=location_required(db,actor)
+        if row: row.data={'required':required}
+        else: db.add(Setting(key=key,data={'required':required}))
+        audit(db,actor,'Alterar exigência de localização própria',actor.id,{'required':before},{'required':required})
+        return {'required':required}
 @app.get('/api/favicon')
 def favicon():
     with reading() as db:
