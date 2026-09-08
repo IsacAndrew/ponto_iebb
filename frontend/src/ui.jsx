@@ -7,15 +7,18 @@ export const dateNow=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_
 export const dateLabel=d=>d?d.split('-').reverse().join('/'):'—';
 export const hours=v=>v===null||v===undefined?'—':`${v<0?'−':''}${Math.floor(Math.abs(v)/60)}h${String(Math.abs(v)%60).padStart(2,'0')}`;
 const inflight=new Map();
+const responseCache=new Map();
 export function api(path,data,method){
  const verb=method||(data===undefined?'GET':'POST'),body=data===undefined?undefined:JSON.stringify(data),key=verb+path+(body||'');
+ const cacheable=verb==='GET'&&!['/me','/punch/today'].includes(path)&&!path.startsWith('/qr/')&&!path.startsWith('/tickets');
+ if(cacheable){const saved=responseCache.get(key);if(saved&&Date.now()-saved.at<60000)return Promise.resolve(saved.value)}
  if(inflight.has(key))return inflight.get(key);
  const task=(async()=>{
   let r;try{r=await fetch('/api'+path,{method:verb,headers:{'Content-Type':'application/json','X-Ponto':'1'},credentials:'same-origin',body});}catch{throw new Error('Sem conexão. Confira sua internet e tente novamente.');}
   if(!r.ok){const j=await r.json().catch(()=>({}));let message=typeof j.detail==='string'?j.detail:Array.isArray(j.detail)?'Confira os campos preenchidos.':r.status>=500?'O serviço está indisponível no momento. Tente novamente.':'Não foi possível concluir esta ação.';if(j.reference)message+=' Referência: '+j.reference;const e=new Error(message);e.status=r.status;console.error('Falha na API',{method:verb,path,status:r.status,reference:j.reference||r.headers.get('X-Request-ID')});throw e;}
   if(r.headers.get('content-type')?.includes('spreadsheet'))return r.blob();
   if(!r.headers.get('content-type')?.includes('application/json'))throw new Error('A página precisa ser atualizada para continuar.');
-  return r.json();
+  const value=await r.json();if(cacheable)responseCache.set(key,{at:Date.now(),value});else if(verb!=='GET')responseCache.clear();return value;
  })();inflight.set(key,task);task.then(()=>inflight.delete(key),()=>inflight.delete(key));return task;
 }
 export function phoneFormat(value=''){

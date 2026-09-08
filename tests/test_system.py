@@ -249,32 +249,26 @@ def test_schedule_query_reused_within_request(client):
     finally:event.remove(db.engine,'before_cursor_execute',count)
 
 
-def test_qr_lifecycle_no_cookie_and_click_required(client,monkeypatch):
+def test_global_qr_uses_authenticated_person(client,monkeypatch):
     pid=add_person(login='qruser');set_schedule(pid,[['07:00','12:00'],['13:00','17:00']])
-    generated=client.post(f'/api/people/{pid}/qr',json={})
+    generated=client.post('/api/system/qr',json={})
     assert generated.status_code==200
     token=generated.json()['url'].split('/q/')[1]
     with TestClient(app) as anonymous:
         anonymous.headers['X-Ponto']='1'
+        assert anonymous.get('/api/qr/'+token).status_code==401
+        assert anonymous.post('/api/login',json={'login':'qruser','password':'definitiva1'}).status_code==200
         state=anonymous.get('/api/qr/'+token)
         assert state.status_code==200 and state.json()['next']=='Entrada'
-        with transaction() as session: assert session.get(Day,f'{pid}:2026-09-03') is None
         result=anonymous.post('/api/qr/'+token+'/punch',json={'key':uuid.uuid4().hex,'lat':-23.67637077,'lon':-46.76243126,'accuracy':10})
-        assert result.status_code==200 and result.json()['confirmation']=='Tenha um bom trabalho'
-        assert anonymous.cookies.get('ponto_session') is None
-    replaced=client.post(f'/api/people/{pid}/qr',json={}).json()['url'].split('/q/')[1]
-    with TestClient(app) as anonymous:
-        anonymous.headers['X-Ponto']='1'
-        assert anonymous.get('/api/qr/'+token).status_code==404
-        assert anonymous.get('/api/qr/'+replaced).status_code==200
-    assert client.get(f'/api/people/{pid}/qr/image').headers['content-type']=='image/png'
+        assert result.status_code==200 and result.json()['confirmation']=='Pessoa, sua entrada foi registrada com sucesso'
+    replaced=client.post('/api/system/qr',json={}).json()['url'].split('/q/')[1]
+    assert client.get('/api/qr/'+token).status_code==404
+    assert client.get('/api/qr/'+replaced).status_code==200
+    assert client.get('/api/system/qr/image').headers['content-type']=='image/png'
 
-def test_qr_labels_admission_and_password_permission(client):
-    pid=add_person(login='labels');set_schedule(pid,[['07:00','11:00'],['12:00','15:00'],['16:00','18:00']])
-    labels=['Chegada','Pausa 1','Retorno 1','Pausa 2','Retorno 2','Encerrar']
-    assert client.put(f'/api/people/{pid}/labels',json={'labels':labels,'messages':['Olá']*6}).status_code==200
-    qr=client.post(f'/api/people/{pid}/qr',json={}).json()['url'].split('/q/')[1]
-    assert client.get('/api/qr/'+qr).json()['labels']==labels
+def test_admission_and_password_permission(client):
+    pid=add_person(login='labels')
     person=next(x for x in client.get('/api/people').json() if x['id']==pid)
     person['hired']='1999-02-01'
     assert client.put(f'/api/people/{pid}',json=person).status_code==200

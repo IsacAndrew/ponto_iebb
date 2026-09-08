@@ -112,13 +112,15 @@ def login(request: Request, response: Response, data: dict=Body(...)):
             token=previous if same else f'{person.id}:'+secrets.token_urlsafe(32)
             person.session={'token':digest(token),'expires':time.time()+43200}
             cookie(response,token)
-            result={'user':public(person)}
+            punch=None if person.role=='Diretoria' else {**summarize(db,person,today()),'now':now().isoformat(),'location_required':location_required(db,person),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
+            result={'user':public(person),'punch':punch}
     return result
 @app.get('/api/me')
 def me(request: Request):
     with reading() as db:
         person=current(db,request,True)
-        return {'user':public(person),'now':now().isoformat(),'location_required':location_required(db,person)}
+        punch=None if person.role=='Diretoria' else {**summarize(db,person,today()),'now':now().isoformat(),'location_required':location_required(db,person),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
+        return {'user':public(person),'now':now().isoformat(),'location_required':location_required(db,person),'punch':punch}
 @app.post('/api/logout')
 def logout(request: Request,response: Response):
     with transaction() as db:
@@ -207,35 +209,33 @@ def punch(request: Request,data: dict=Body(...)):
     with transaction() as db:
         return process_punch(db,current(db,request),data)
 
-def qr_person(db,token):
+def qr_person(db,request,token):
     if not token or len(token)>200: fail('QR Code inválido.',404)
-    row=db.get(Setting,'qr-token:'+digest(token))
-    person=db.get(Person,row.data.get('person_id')) if row else None
-    if not person or not person.active: fail('QR Code inválido ou substituído.',404)
-    return person
+    row=db.get(Setting,'qr-global')
+    if not row or not secrets.compare_digest(digest(token),row.data.get('hash','')): fail('QR Code inválido ou substituído.',404)
+    return current(db,request)
 
-def button_labels(person,periods):
+def button_labels(periods):
     total=len([v for pair in periods for v in pair])
     defaults=['Entrada','Saída para intervalo','Retorno do intervalo','Saída']
     if total==2: defaults=['Entrada','Saída']
-    labels=list(person.details.get('punch_labels',[]))
-    return [(labels[i] if i<len(labels) and str(labels[i]).strip() else defaults[i] if i<len(defaults) else ('Entrada' if i%2==0 else 'Saída')) for i in range(total)]
+    return [(defaults[i] if i<len(defaults) else ('Entrada' if i%2==0 else 'Saída')) for i in range(total)]
 
 @app.get('/api/qr/{token}')
-def qr_state(token:str):
+def qr_state(token:str,request:Request):
     with reading() as db:
-        p=qr_person(db,token); summary=summarize(db,p,today())
-        labels=button_labels(p,summary['periods']); index=len(summary['punches'])
+        p=qr_person(db,request,token); summary=summarize(db,p,today())
+        labels=button_labels(summary['periods']); index=len(summary['punches'])
         return {'name':p.name.split()[0],'now':now().isoformat(),'day':summary,'labels':labels,'can_register':bool(labels),'location_required':location_required(db,p),'next':labels[index] if index<len(labels) else ('Registrar hora extra' if labels else 'Sem jornada hoje')}
 
 @app.post('/api/qr/{token}/punch')
-def qr_punch(token:str,data:dict=Body(...)):
+def qr_punch(token:str,request:Request,data:dict=Body(...)):
     with transaction() as db:
-        p=qr_person(db,token); result=process_punch(db,p,data,'qr')
+        p=qr_person(db,request,token); result=process_punch(db,p,data,'qr')
         if 'day' in result:
-            index=len(result['day']['punches'])-1; labels=button_labels(p,result['day']['periods']); label=labels[index] if index<len(labels) else 'Hora extra'
-            custom=list(p.details.get('punch_messages',[])); defaults=['Tenha um bom trabalho','Tenha um bom intervalo','Tenha um bom trabalho','Tenha um bom descanso']
-            message=custom[index] if index<len(custom) and str(custom[index]).strip() else defaults[index] if index<len(defaults) else ('Tenha um bom trabalho' if index%2==0 else 'Tenha um bom descanso')
+            index=len(result['day']['punches'])-1; labels=button_labels(result['day']['periods']); label=labels[index] if index<len(labels) else 'Hora extra'
+            phrases=['sua entrada foi registrada','seu intervalo foi registrado','seu retorno foi registrado','sua saída foi registrada']
+            message=f'{p.name.split()[0]}, {phrases[index] if index<len(phrases) else "seu ponto foi registrado"} com sucesso'
             result.update(label=label,confirmation=message,registered_at=now().strftime('%H:%M:%S'))
         return result
 
@@ -272,7 +272,7 @@ def update_person(pid:int,request: Request,data: dict=Body(...)):
         if actor.id==pid and role!=p.role: fail('Você não pode alterar o próprio perfil de acesso.')
         if db.scalar(select(Person.id).where(Person.login==login,Person.id!=pid)): fail('Este login já está em uso.')
         before=person_data(p)
-        for key in ('lessons','subjects_by_class','punch_labels','punch_messages'):
+        for key in ('lessons','subjects_by_class'):
             if key in p.details: details[key]=p.details[key]
         p.name,p.login,p.role,p.details,p.hired=name,login,role,details,valid_date(data.get('hired',p.hired))
         if before['role']!=role: p.session={}
@@ -618,54 +618,31 @@ def audit_list(request:Request,month:str):
         require(current(db,request),ADMIN)
         return [{'id':a.id,'at':a.at,'actor':a.actor,'action':a.action,'target':a.target,'before':a.before,'after':a.after,'reason':a.reason} for a in db.scalars(select(Audit).order_by(Audit.id.desc())) if month in a.target or a.at.startswith(month)]
 
-@app.get('/api/people/{pid}/qr')
-def get_qr(pid:int,request:Request):
+@app.get('/api/system/qr')
+def get_global_qr(request:Request):
     with reading() as db:
-        actor=current(db,request); require(actor,FULL_ACCESS); editable(actor,db.get(Person,pid))
-        row=db.get(Setting,f'qr-person:{pid}')
+        require(current(db,request),FULL_ACCESS); row=db.get(Setting,'qr-global')
         return {'active':bool(row),'url':('/q/'+row.data['token']) if row else ''}
-@app.post('/api/people/{pid}/qr')
-def create_qr(pid:int,request:Request):
+
+@app.post('/api/system/qr')
+def create_global_qr(request:Request):
     with transaction() as db:
-        actor=current(db,request); require(actor,FULL_ACCESS); person=db.get(Person,pid)
-        if not person: fail('Pessoa não encontrada.',404)
-        editable(actor,person); old=db.get(Setting,f'qr-person:{pid}')
-        if old:
-            token_row=db.get(Setting,'qr-token:'+digest(old.data['token']))
-            if token_row: db.delete(token_row)
-        token=secrets.token_urlsafe(48); mapping=Setting(key=f'qr-person:{pid}',data={'token':token})
-        if old: old.data={'token':token}
-        else: db.add(mapping)
-        db.add(Setting(key='qr-token:'+digest(token),data={'person_id':pid}))
-        audit(db,actor,'Gerar QR individual',pid,before={'active':bool(old)},after={'active':True})
+        actor=current(db,request); require(actor,FULL_ACCESS); row=db.get(Setting,'qr-global'); token=secrets.token_urlsafe(48)
+        value={'token':token,'hash':digest(token)}
+        if row: row.data=value
+        else: db.add(Setting(key='qr-global',data=value))
+        audit(db,actor,'Gerar QR institucional','sistema',before={'active':bool(row)},after={'active':True})
         return {'active':True,'url':'/q/'+token}
 
-@app.get('/api/people/{pid}/qr/image')
-def qr_image(pid:int,request:Request):
+@app.get('/api/system/qr/image')
+def global_qr_image(request:Request):
     with reading() as db:
-        actor=current(db,request); require(actor,FULL_ACCESS); editable(actor,db.get(Person,pid)); row=db.get(Setting,f'qr-person:{pid}')
+        require(current(db,request),FULL_ACCESS); row=db.get(Setting,'qr-global')
         if not row: fail('Gere o QR Code primeiro.',404)
         import qrcode
         url=str(request.base_url).rstrip('/')+'/q/'+row.data['token']
         image=qrcode.make(url); output=io.BytesIO(); image.save(output,format='PNG')
         return RawResponse(output.getvalue(),media_type='image/png',headers={'Cache-Control':'no-store'})
-@app.delete('/api/people/{pid}/qr')
-def revoke_qr(pid:int,request:Request):
-    with transaction() as db:
-        actor=current(db,request); require(actor,FULL_ACCESS); editable(actor,db.get(Person,pid)); old=db.get(Setting,f'qr-person:{pid}')
-        if old:
-            token_row=db.get(Setting,'qr-token:'+digest(old.data['token']))
-            if token_row: db.delete(token_row)
-            db.delete(old); audit(db,actor,'Revogar QR individual',pid,after={'active':False})
-        return {'ok':True}
-@app.put('/api/people/{pid}/labels')
-def save_labels(pid:int,request:Request,data:dict=Body(...)):
-    with transaction() as db:
-        actor=current(db,request); require(actor,ADMIN); person=db.get(Person,pid)
-        if not person: fail('Pessoa não encontrada.',404)
-        labels=[str(x).strip()[:80] for x in data.get('labels',[])]; messages=[str(x).strip()[:120] for x in data.get('messages',[])]
-        before=person.details; person.details={**person.details,'punch_labels':labels,'punch_messages':messages}
-        audit(db,actor,'Alterar rótulos das marcações',pid,before,person.details); return {'ok':True}
 @app.get('/api/support/my-location')
 def my_location(request:Request):
     with reading() as db:
