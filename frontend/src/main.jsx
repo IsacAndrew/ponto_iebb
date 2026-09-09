@@ -12,7 +12,7 @@ function App(){
  const [me,setMe]=useState(null),[punchInitial,setPunchInitial]=useState(null),[loading,setLoading]=useState(true),[page,setPage]=useState('Ponto'),[error,setError]=useState(''),[toast,setToast]=useState(''),[busy,setBusy]=useState(false),[nav,setNav]=useState(false),[chat,setChat]=useState(false),[passwordPrompt,setPasswordPrompt]=useState(false),[unread,setUnread]=useState({count:0,names:[]}),[messageNotice,setMessageNotice]=useState(false);
  const navCount=useRef(0);
  const timer=useRef(),generation=useRef(0),activeRuns=useRef(0),refreshing=useRef(false);
- const notify=text=>{setToast(text);clearTimeout(timer.current);timer.current=setTimeout(()=>setToast(''),6500);};
+ const notify=text=>{setToast(text);window.dispatchEvent(new CustomEvent('ponto-success',{detail:text}));clearTimeout(timer.current);timer.current=setTimeout(()=>setToast(''),6500);};
  const run=async fn=>{activeRuns.current++;setBusy(true);setError('');try{return await fn();}catch(e){setError(e.message);window.dispatchEvent(new CustomEvent('ponto-error',{detail:e.message}));if(e.status===401){generation.current++;setMe(null);}return null;}finally{activeRuns.current--;setBusy(activeRuns.current>0);}};
  const refresh=async()=>{if(refreshing.current)return;refreshing.current=true;const version=generation.current;try{const r=await api('/me');if(version===generation.current){setMe(old=>JSON.stringify(old)===JSON.stringify(r.user)?old:r.user);if(r.punch)setPunchInitial(r.punch)}}catch(e){if(version===generation.current){if(e.status===401)setMe(null);else setError(e.message);}}finally{refreshing.current=false;setLoading(false);}};
  useEffect(()=>{refresh();},[]);
