@@ -8,6 +8,13 @@ ROLES = ['Colaborador', 'Professor', 'Administração', 'Diretoria', 'Suporte']
 ADMIN = ROLES[2:]
 CLASSES = ['Jardim', 'Pré', '1º Ano A', '1º Ano B', '2º Ano A', '2º Ano B', '3º Ano A', '3º Ano B', '4º Ano A', '5º Ano A', '5º Ano B', '6º Ano A', '7º Ano A', '8º Ano A', '8º Ano B', '9º Ano A', '1ª Série', '2ª Série', '3ª Série']
 def fail(message, code=400): raise HTTPException(code, message)
+def roles_for(person):
+    saved=person.details.get('roles',[]) if isinstance(person.details,dict) else []
+    roles=[role for role in saved if role in ROLES]
+    return list(dict.fromkeys(roles or [person.role]))
+def effective_role(person):
+    selected=(person.session or {}).get('active_role')
+    return selected if selected in roles_for(person) else person.role
 def minutes(value):
     try:
         h, m = map(int, value.split(':'))
@@ -79,7 +86,10 @@ def summarize(db, person, day):
     status = free or ('Falta registrada' if absent and not punches else 'Falta com comparecimento' if absent else 'Sem expediente' if not expected and not punches else 'Completo' if complete and punches else 'Ponto incompleto' if punches else 'Sem marcações')
     if absent and not punches and not free: negative = planned
     balance = extra-negative if complete or absent or free else None
-    return dict(person_id=person.id, name=person.name, role=person.role, date=day, periods=periods, punches=punches, planned=planned, worked=worked, extra=extra, negative=negative, late=late, balance=balance, absent=absent, status=status, holiday=free, overtime=row.overtime if row else '', expected=len(expected), terminated=person.terminated)
+    assigned=roles_for(person); role=punches[0].get('access_role') if punches and punches[0].get('access_role') in assigned else ('Professor' if 'Professor' in assigned else person.role)
+    label={'Administração':'Administrador'}.get(role,role)
+    name=f'{person.name} ({label})' if len(assigned)>1 else person.name
+    return dict(person_id=person.id, name=name, role=role, date=day, periods=periods, punches=punches, planned=planned, worked=worked, extra=extra, negative=negative, late=late, balance=balance, absent=absent, status=status, holiday=free, overtime=row.overtime if row else '', expected=len(expected), terminated=person.terminated)
 def distance(lat, lon, target_lat, target_lon):
     a,b = radians(lat),radians(target_lat)
     v=sin((b-a)/2)**2+cos(a)*cos(b)*sin(radians(target_lon-lon)/2)**2

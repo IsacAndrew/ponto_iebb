@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from .db import ROOT, init, transaction, reading, Person, Schedule, Day, Item, Setting, Audit, audit, now, today
-from .rules import ROLES, ADMIN, CLASSES, fail, minutes, valid_date, validate_days, schedule_for, holiday, unlocked, get_day, summarize, distance, suspect_missing
+from .rules import ROLES, ADMIN, CLASSES, fail, minutes, valid_date, validate_days, schedule_for, holiday, unlocked, get_day, summarize, distance, suspect_missing, roles_for, effective_role
 from .security import password_hash, verify, digest, cookie, current, require, confirm, public, FULL_ACCESS
 
 @asynccontextmanager
@@ -110,34 +110,43 @@ def login(request: Request, response: Response, data: dict=Body(...)):
             previous=request.cookies.get('ponto_session','')
             same=previous and digest(previous)==state.get('token') and state.get('expires',0)>time.time()
             token=previous if same else f'{person.id}:'+secrets.token_urlsafe(32)
-            person.session={'token':digest(token),'expires':time.time()+43200}
+            assigned=roles_for(person)
+            person.session={'token':digest(token),'expires':time.time()+43200,**({'active_role':assigned[0]} if len(assigned)==1 else {})}
             cookie(response,token)
-            punch=None if person.role=='Diretoria' else {**summarize(db,person,today()),'now':now().isoformat(),'location_required':location_required(db,person),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
-            result={'user':public(person),'punch':punch}
+            punch=None if len(assigned)>1 or effective_role(person)=='Diretoria' else {**summarize(db,person,today()),'now':now().isoformat(),'location_required':location_required(db,person),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
+            result={'user':public(person,True),'punch':punch}
     return result
 @app.get('/api/me')
 def me(request: Request):
     with reading() as db:
-        person=current(db,request,True)
-        punch=None if person.role=='Diretoria' else {**summarize(db,person,today()),'now':now().isoformat(),'location_required':location_required(db,person),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
-        return {'user':public(person),'now':now().isoformat(),'location_required':location_required(db,person),'punch':punch}
+        person=current(db,request,True,True); selected=not public(person,True)['access_required']
+        punch=None if not selected or effective_role(person)=='Diretoria' else {**summarize(db,person,today()),'now':now().isoformat(),'location_required':location_required(db,person),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
+        return {'user':public(person,True),'now':now().isoformat(),'location_required':location_required(db,person),'punch':punch}
+@app.post('/api/access')
+def choose_access(request:Request,data:dict=Body(...)):
+    with transaction() as db:
+        person=current(db,request,True,True); role=data.get('role')
+        if role not in roles_for(person): fail('Perfil de acesso inválido.',403)
+        person.session={**person.session,'active_role':role}
+        punch=None if role=='Diretoria' else {**summarize(db,person,today()),'now':now().isoformat(),'location_required':location_required(db,person),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
+        return {'user':public(person,True),'punch':punch}
 @app.post('/api/logout')
 def logout(request: Request,response: Response):
     with transaction() as db:
-        person=current(db,request,True); person.session={}
+        person=current(db,request,True,True); person.session={}
     response.delete_cookie('ponto_session')
     return {'ok':True}
 @app.post('/api/password')
 def password(request: Request,data: dict=Body(...)):
     with transaction() as db:
-        person=current(db,request,True)
+        person=current(db,request,True,True)
         if not person.temporary: confirm(person,data.get('current',''))
         value=str(data.get('password',''))
         if len(value)<4 or len(value)>128 or value=='102030': fail('Use uma senha definitiva com 4 a 128 caracteres.')
         person.password=password_hash(value); person.temporary=False
         person.session={k:v for k,v in person.session.items() if k not in ('pending','deadline')}
         audit(db,person,'Senha alterada',person.id)
-        return public(person)
+        return public(person,True)
 @app.post('/api/profile/login')
 def reveal(request: Request,data: dict=Body(...)):
     with transaction() as db:
@@ -145,7 +154,7 @@ def reveal(request: Request,data: dict=Body(...)):
         return {'login':person.login}
 
 def location_required(db,person):
-    row=db.get(Setting,f'geo-required:{person.id}') if person.role=='Suporte' else None
+    row=db.get(Setting,f'geo-required:{person.id}') if effective_role(person)=='Suporte' else None
     return row is None or row.data.get('required') is not False
 def occurrence(db,person,day,title,details=None):
     for existing in db.scalars(select(Item).where(Item.kind=='occurrence',Item.person_id==person.id,Item.date==day,Item.status=='Pendente')):
@@ -157,7 +166,7 @@ def punch_today(request: Request):
         p=current(db,request)
         return {**summarize(db,p,today()),'now':now().isoformat(),'location_required':location_required(db,p),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
 def process_punch(db,p,data,source='site'):
-    if p.role=='Diretoria': fail('Este perfil não tem jornada obrigatória.')
+    if effective_role(p)=='Diretoria': fail('Este perfil não tem jornada obrigatória.')
     d=today(); unlocked(db,d)
     row=get_day(db,p,d,True)
     if not row.punches: row.periods=schedule_for(db,p,d)
@@ -190,7 +199,7 @@ def process_punch(db,p,data,source='site'):
         meters=distance(lat,lon,geo['lat'],geo['lon'])
         if meters>100: fail(f'Você está a {round(meters)} m da escola. Aproxime-se para registrar.',422)
         location={'lat':lat,'lon':lon,'accuracy':accuracy,'distance':round(meters,1)}
-    punches.append({'time':stamp.strftime('%H:%M'),'at':stamp.isoformat(),'epoch':stamp.timestamp(),'key':key,'test':test,**location})
+    punches.append({'time':stamp.strftime('%H:%M'),'at':stamp.isoformat(),'epoch':stamp.timestamp(),'key':key,'test':test,'access_role':effective_role(p),**location})
     row.punches=punches
     if unusual: occurrence(db,p,d,'Batida possivelmente esquecida' if data.get('forgot')=='yes' else 'Marcação fora do esperado',{'answer':data.get('forgot')})
     if extra: occurrence(db,p,d,'Batida adicional')
@@ -250,14 +259,19 @@ def clean_person(data):
     if not name or len(name)>160 or not login or len(login)>100 or role not in ROLES: fail('Preencha nome, login e perfil válidos.')
     details={k:str(data.get('details',{}).get(k,''))[:250] for k in ('email','phone','birth')}
     details['phone']=''.join(c for c in details['phone'] if c.isdigit())
+    requested=data.get('roles',[role]); assigned=list(dict.fromkeys(r for r in requested if r in ROLES))
+    if role not in assigned: assigned.insert(0,role)
+    if len(assigned)>2: fail('Selecione no máximo dois perfis de acesso.')
+    details['roles']=assigned
     return name,login,role,details
-def editable(actor,target,role=None):
-    if actor.role=='Administração' and ((target and target.role in FULL_ACCESS) or role in FULL_ACCESS): fail('Somente Diretoria ou Suporte gerenciam esse perfil.',403)
+def editable(actor,target,role=None,assigned=None):
+    target_roles=list(dict.fromkeys((roles_for(target) if target else [])+(assigned or [role])))
+    if effective_role(actor)=='Administração' and any(value in FULL_ACCESS for value in target_roles): fail('Somente Diretoria ou Suporte gerenciam esse perfil.',403)
 @app.post('/api/people')
 def add_person(request: Request,data: dict=Body(...)):
     with transaction() as db:
         actor=current(db,request); require(actor,ADMIN)
-        name,login,role,details=clean_person(data); editable(actor,None,role)
+        name,login,role,details=clean_person(data); editable(actor,None,role,details['roles'])
         if db.scalar(select(Person.id).where(Person.login==login)): fail('Este login já está em uso.')
         hired=valid_date(data.get('hired',today()))
         p=Person(name=name,login=login,role=role,details=details,hired=hired,password=password_hash('102030'),session={})
@@ -268,14 +282,14 @@ def update_person(pid:int,request: Request,data: dict=Body(...)):
     with transaction() as db:
         actor=current(db,request); require(actor,ADMIN); p=db.get(Person,pid)
         if not p: fail('Pessoa não encontrada.',404)
-        name,login,role,details=clean_person(data); editable(actor,p,role)
-        if actor.id==pid and role!=p.role: fail('Você não pode alterar o próprio perfil de acesso.')
+        name,login,role,details=clean_person(data); editable(actor,p,role,details['roles'])
+        if actor.id==pid and details['roles']!=roles_for(p): fail('Você não pode alterar o próprio perfil de acesso.')
         if db.scalar(select(Person.id).where(Person.login==login,Person.id!=pid)): fail('Este login já está em uso.')
         before=person_data(p)
         for key in ('lessons','subjects_by_class'):
             if key in p.details: details[key]=p.details[key]
         p.name,p.login,p.role,p.details,p.hired=name,login,role,details,valid_date(data.get('hired',p.hired))
-        if before['role']!=role: p.session={}
+        if before['roles']!=details['roles']: p.session={}
         audit(db,actor,'Alterar cadastro',pid,before,person_data(p),data.get('reason','Atualização cadastral'))
         return person_data(p)
 @app.post('/api/people/{pid}/reset')
@@ -323,7 +337,7 @@ def add_schedule(pid:int,request: Request,data: dict=Body(...)):
 def lessons(pid:int,request: Request,data: dict=Body(...)):
     with transaction() as db:
         actor=current(db,request); require(actor,ADMIN); p=db.get(Person,pid)
-        if not p or p.role!='Professor': fail('Selecione um professor.')
+        if not p or 'Professor' not in roles_for(p): fail('Selecione um professor.')
         rows=data.get('lessons',[]); subjects=p.details.get('subjects_by_class',{})
         for row in rows:
             day=str(row.get('day'))
@@ -337,7 +351,7 @@ def lessons(pid:int,request: Request,data: dict=Body(...)):
 def subjects(pid:int,request:Request,data:dict=Body(...)):
     with transaction() as db:
         actor=current(db,request); require(actor,ADMIN); person=db.get(Person,pid)
-        if not person or person.role!='Professor': fail('Selecione um professor.')
+        if not person or 'Professor' not in roles_for(person): fail('Selecione um professor.')
         result={}
         for classroom,values in data.get('subjects',{}).items():
             if classroom not in CLASSES: fail('Confira a turma.')
@@ -356,7 +370,7 @@ def records(request: Request,start:str,end:str,person_id:int|None=None):
     if end<start or (date.fromisoformat(end)-date.fromisoformat(start)).days>93: fail('Selecione até 93 dias.')
     with reading() as db:
         actor=current(db,request)
-        if actor.role not in ADMIN: person_id=actor.id
+        if effective_role(actor) not in ADMIN: person_id=actor.id
         people=list(db.scalars(select(Person).where(Person.id==person_id))) if person_id else list(db.scalars(select(Person).order_by(Person.name)))
         result=[]; day=date.fromisoformat(start)
         while day.isoformat()<=end:
@@ -370,7 +384,7 @@ def attendance(request: Request,day:str):
     valid_date(day)
     with reading() as db:
         require(current(db,request),ADMIN)
-        rows=[summarize(db,p,day) for p in db.scalars(select(Person).order_by(Person.name)) if p.role!='Diretoria' and p.hired<=day and (not p.terminated or day<=p.terminated)]
+        rows=[summarize(db,p,day) for p in db.scalars(select(Person).order_by(Person.name)) if roles_for(p)!=['Diretoria'] and p.hired<=day and (not p.terminated or day<=p.terminated)]
         return sorted(rows,key=lambda r:(not bool(r['expected'] and not r['holiday']),r['name']))
 @app.post('/api/absence')
 def absence(request: Request,data:dict=Body(...)):
@@ -379,7 +393,7 @@ def absence(request: Request,data:dict=Body(...)):
         p=db.get(Person,data.get('person_id'))
         if not p: fail('Pessoa não encontrada.',404)
         row=get_day(db,p,d,True); before={'absent':row.absent}
-        if data.get('absent') and (holiday(db,d) or not row.periods or p.role=='Diretoria'): fail('Não há expediente previsto nesta data.')
+        if data.get('absent') and (holiday(db,d) or not row.periods or roles_for(p)==['Diretoria']): fail('Não há expediente previsto nesta data.')
         row.absent=bool(data.get('absent'))
         audit(db,actor,'Registrar falta' if row.absent else 'Desmarcar falta',row.key,before,{'absent':row.absent})
         if row.absent and row.punches: occurrence(db,p,d,'Falta registrada com comparecimento')
@@ -409,7 +423,7 @@ def corrections(request:Request,data:dict=Body(...)):
 def requests(request:Request):
     with reading() as db:
         actor=current(db,request)
-        return [item_json(db,r) for r in db.scalars(select(Item).where(Item.kind=='request').order_by(Item.id.desc())) if actor.role in FULL_ACCESS or r.person_id==actor.id]
+        return [item_json(db,r) for r in db.scalars(select(Item).where(Item.kind=='request').order_by(Item.id.desc())) if effective_role(actor) in FULL_ACCESS or r.person_id==actor.id]
 def item_json(db,r):
     p=db.get(Person,r.person_id)
     return dict(id=r.id,kind=r.kind,person_id=r.person_id,name=p.name if p else '',date=r.date,status=r.status,data=r.data)
@@ -427,7 +441,7 @@ def update_profile(request:Request,data:dict=Body(...)):
                 details[key]=''.join(c for c in value if c.isdigit()) if key=='phone' else value
         actor.name=name; actor.details=details
         audit(db,actor,'Editar próprio cadastro',actor.id,before,public(actor),'Atualização pelo titular')
-        return public(actor)
+        return public(actor,True)
 
 @app.post('/api/requests')
 def new_request(request:Request,data:dict=Body(...)):
@@ -499,26 +513,26 @@ def tickets(request:Request, management:bool=False):
     with reading() as db:
         actor=current(db,request)
         if management: require(actor,['Suporte'])
-        return [item_json(db,r) for r in db.scalars(select(Item).where(Item.kind=='ticket').order_by(Item.id.desc())) if (management and actor.role=='Suporte') or r.person_id==actor.id]
+        return [item_json(db,r) for r in db.scalars(select(Item).where(Item.kind=='ticket').order_by(Item.id.desc())) if (management and effective_role(actor)=='Suporte') or r.person_id==actor.id]
 @app.post('/api/tickets')
 def new_ticket(request:Request,data:dict=Body(...)):
     with transaction() as db:
         actor=current(db,request)
-        if actor.role=='Suporte': fail('Selecione um chamado para responder.',403)
+        if effective_role(actor)=='Suporte': fail('Selecione um chamado para responder.',403)
         message=str(data.get('message','')).strip()
         if not message or len(message)>4000: fail('Escreva uma mensagem com até 4000 caracteres.')
         row=db.scalar(select(Item).where(Item.kind=='ticket',Item.person_id==actor.id))
         if not row: row=Item(kind='ticket',person_id=actor.id,data={'messages':[]}); db.add(row)
-        row.data={'messages':row.data['messages']+[{'name':actor.name,'support':actor.role=='Suporte' and row.person_id!=actor.id,'text':message,'at':now().isoformat()}]}
+        row.data={'messages':row.data['messages']+[{'name':actor.name,'support':effective_role(actor)=='Suporte' and row.person_id!=actor.id,'text':message,'at':now().isoformat()}]}
         return {'ok':True}
 @app.post('/api/tickets/{rid}/message')
 def message(rid:int,request:Request,data:dict=Body(...)):
     with transaction() as db:
         actor=current(db,request); row=db.get(Item,rid)
-        if not row or row.kind!='ticket' or actor.role!='Suporte' and row.person_id!=actor.id: fail('Chamado não encontrado.',404)
+        if not row or row.kind!='ticket' or effective_role(actor)!='Suporte' and row.person_id!=actor.id: fail('Chamado não encontrado.',404)
         value=str(data.get('message','')).strip()
         if not value or len(value)>4000: fail('Escreva uma mensagem com até 4000 caracteres.')
-        row.data={'messages':row.data['messages']+[{'name':actor.name,'support':actor.role=='Suporte' and row.person_id!=actor.id,'text':value,'at':now().isoformat()}]}
+        row.data={'messages':row.data['messages']+[{'name':actor.name,'support':effective_role(actor)=='Suporte' and row.person_id!=actor.id,'text':value,'at':now().isoformat()}]}
         return {'ok':True}
 @app.delete('/api/tickets/{rid}')
 def close_ticket(rid:int,request:Request):

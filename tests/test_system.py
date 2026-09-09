@@ -362,3 +362,25 @@ def test_grade_times_are_manual_and_do_not_change_schedule(client,monkeypatch):
         assert point['periods']==[['07:10','08:50'],['09:10','12:30']] and point['expected']==4
     storage=client.get('/api/system/storage')
     assert storage.status_code==200 and storage.json()['used_bytes']>0 and storage.json()['limit_bytes']>0
+
+def test_one_login_can_choose_professor_or_administrator(client,monkeypatch):
+    pid=add_person(login='edson');set_schedule(pid,[['07:10','08:50']])
+    with transaction() as db:
+        person=db.get(Person,pid);person.details={**person.details,'roles':['Professor','Administração']}
+    at(monkeypatch,'2026-09-03T07:10:00')
+    with TestClient(app) as user:
+        user.headers['X-Ponto']='1'
+        login=user.post('/api/login',json={'login':'edson','password':'definitiva1'}).json()
+        assert login['user']['access_required'] and login['punch'] is None
+        assert user.get('/api/people').status_code==409
+        chosen=user.post('/api/access',json={'role':'Professor'}).json()
+        assert chosen['user']['role']=='Professor' and not chosen['user']['access_required']
+        assert user.get('/api/people').status_code==403
+        assert punch(user).status_code==200
+        user.post('/api/logout',json={})
+        user.post('/api/login',json={'login':'edson','password':'definitiva1'})
+        assert user.post('/api/access',json={'role':'Administração'}).json()['user']['role']=='Administração'
+        assert user.get('/api/people').status_code==200
+    workbook=load_workbook(BytesIO(client.post('/api/month/2026-09/export',json={'password':'definitiva1'}).content))
+    names=[cell.value for cell in workbook['Pontos - Geral']['C']]
+    assert 'Pessoa edson (Professor)' in names
