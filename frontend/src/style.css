@@ -12,3 +12,5 @@
 .inline-success{background:#edf8ef;color:#24643d;border:1px solid #c7e4ce;padding:15px 20px;border-radius:10px;margin-bottom:24px;display:flex;align-items:center;gap:15px}.inline-success button{background:transparent;color:inherit;font-size:20px;margin-left:auto}
 
 .schedule-missing{margin:-18px 0 24px;padding:14px;background:#fff8e8;border:1px solid #ead8ae;border-radius:10px}.schedule-missing p{margin:0;color:#795d24}.schedule-missing .text-button{margin-top:5px}
+
+.grade-toolbar{display:flex;align-items:end;gap:14px;margin-bottom:18px}.grade-toolbar .field{margin:0;min-width:210px}.pedagogical-table{border:1px solid var(--line);border-radius:12px}.pedagogical-table input,.pedagogical-table select{min-width:125px}.pedagogical-table td:first-child{white-space:nowrap}@media(max-width:760px){.grade-toolbar{align-items:stretch;flex-direction:column}.grade-toolbar .field{min-width:0}.pedagogical-table{border-radius:9px}}
