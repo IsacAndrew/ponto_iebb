@@ -7,3 +7,5 @@
 .settings-actions{display:flex;gap:12px;flex-wrap:wrap}.settings-actions .secondary{flex:1}.settings-actions .settings-wide{flex-basis:100%}.directory-back{margin-bottom:12px}.directory-table{border:1px solid var(--line);border-radius:12px;overflow:hidden}.subject-list{display:flex;flex-wrap:wrap;gap:10px}.subject-list span{padding:11px 15px;background:#edf6ef;border:1px solid #d5e8da;border-radius:9px}.punch-button:active:not(:disabled){transform:scale(.99)}
 
 @media(max-width:560px){.access-options{grid-template-columns:1fr}.access-options button{min-height:125px}}
+
+.nav-badge{margin-left:auto;min-width:22px;height:22px;padding:0 6px;border-radius:12px;background:#d9564f;color:#fff;display:grid;place-items:center;font-size:.75rem;font-weight:700}

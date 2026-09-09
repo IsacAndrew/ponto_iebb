@@ -514,6 +514,28 @@ def tickets(request:Request, management:bool=False):
         actor=current(db,request)
         if management: require(actor,['Suporte'])
         return [item_json(db,r) for r in db.scalars(select(Item).where(Item.kind=='ticket').order_by(Item.id.desc())) if (management and effective_role(actor)=='Suporte') or r.person_id==actor.id]
+@app.get('/api/tickets/unread')
+def unread_tickets(request:Request):
+    with reading() as db:
+        require(current(db,request),['Suporte']); count=0; names=[]
+        for row in db.scalars(select(Item).where(Item.kind=='ticket').order_by(Item.id.desc())):
+            unread=[message for message in row.data.get('messages',[]) if not message.get('support') and not message.get('support_read',False)]
+            if unread:
+                count+=len(unread); name=db.get(Person,row.person_id).name
+                if name not in names: names.append(name)
+        return {'count':count,'names':names}
+@app.post('/api/tickets/read')
+def read_tickets(request:Request):
+    with transaction() as db:
+        require(current(db,request),['Suporte']); count=0
+        for row in db.scalars(select(Item).where(Item.kind=='ticket')):
+            messages=[]; changed=False
+            for message in row.data.get('messages',[]):
+                if not message.get('support') and not message.get('support_read',False):
+                    message={**message,'support_read':True}; changed=True; count+=1
+                messages.append(message)
+            if changed: row.data={**row.data,'messages':messages}
+        return {'read':count}
 @app.post('/api/tickets')
 def new_ticket(request:Request,data:dict=Body(...)):
     with transaction() as db:
@@ -523,7 +545,7 @@ def new_ticket(request:Request,data:dict=Body(...)):
         if not message or len(message)>4000: fail('Escreva uma mensagem com até 4000 caracteres.')
         row=db.scalar(select(Item).where(Item.kind=='ticket',Item.person_id==actor.id))
         if not row: row=Item(kind='ticket',person_id=actor.id,data={'messages':[]}); db.add(row)
-        row.data={'messages':row.data['messages']+[{'name':actor.name,'support':effective_role(actor)=='Suporte' and row.person_id!=actor.id,'text':message,'at':now().isoformat()}]}
+        row.data={'messages':row.data['messages']+[{'name':actor.name,'support':False,'support_read':False,'text':message,'at':now().isoformat()}]}
         return {'ok':True}
 @app.post('/api/tickets/{rid}/message')
 def message(rid:int,request:Request,data:dict=Body(...)):
@@ -532,7 +554,8 @@ def message(rid:int,request:Request,data:dict=Body(...)):
         if not row or row.kind!='ticket' or effective_role(actor)!='Suporte' and row.person_id!=actor.id: fail('Chamado não encontrado.',404)
         value=str(data.get('message','')).strip()
         if not value or len(value)>4000: fail('Escreva uma mensagem com até 4000 caracteres.')
-        row.data={'messages':row.data['messages']+[{'name':actor.name,'support':effective_role(actor)=='Suporte' and row.person_id!=actor.id,'text':value,'at':now().isoformat()}]}
+        support=effective_role(actor)=='Suporte' and row.person_id!=actor.id
+        row.data={'messages':row.data['messages']+[{'name':actor.name,'support':support,'support_read':support,'text':value,'at':now().isoformat()}]}
         return {'ok':True}
 @app.delete('/api/tickets/{rid}')
 def close_ticket(rid:int,request:Request):

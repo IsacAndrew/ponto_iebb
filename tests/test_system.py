@@ -137,9 +137,13 @@ def test_tickets_delete_and_requests_audit(client):
     with TestClient(app) as c:
         c.headers['X-Ponto']='1';c.post('/api/login',json={'login':'professor','password':'definitiva1'})
         assert c.post('/api/tickets',json={'message':'Preciso de ajuda'}).status_code==200
+        assert client.get('/api/tickets/unread').json()=={'count':1,'names':['Pessoa professor']}
         ticket=c.get('/api/tickets').json()[0]['id']
         assert c.delete('/api/tickets/'+str(ticket)).status_code==403
         assert client.post(f'/api/tickets/{ticket}/message',json={'message':'Vou verificar'}).status_code==200
+        assert client.get('/api/tickets/unread').json()['count']==1
+        assert client.post('/api/tickets/read',json={}).json()=={'read':1}
+        assert client.get('/api/tickets/unread').json()=={'count':0,'names':[]}
         assert len(c.get('/api/tickets').json()[0]['data']['messages'])==2
         assert client.delete('/api/tickets/'+str(ticket)).status_code==200
         assert c.get('/api/tickets').json()==[]
