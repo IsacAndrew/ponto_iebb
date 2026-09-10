@@ -336,18 +336,42 @@ def add_schedule(pid:int,request: Request,data: dict=Body(...)):
         if row and not row.punches and row.date==d: row.periods=days.get(str(date.fromisoformat(d).weekday()),[])
         audit(db,actor,'Alterar jornada',f'{pid}:{d}',after={'days':days,'specific':specific},reason=data.get('reason','Nova vigência'))
         return {'effective':d,'deferred':d!=data.get('effective')}
+def clean_subjects(values):
+    if not isinstance(values,dict): fail('Confira as matérias e turmas.')
+    result={}
+    for classroom,values in values.items():
+        if classroom not in CLASSES: fail('Confira a turma.')
+        clean=[]
+        for value in values:
+            subject=str(value).strip()[:80]
+            if subject and subject not in clean: clean.append(subject)
+        if clean: result[classroom]=clean
+    return result
+
 @app.put('/api/people/{pid}/lessons')
 def lessons(pid:int,request: Request,data: dict=Body(...)):
     with transaction() as db:
         actor=current(db,request); require(actor,ADMIN); p=db.get(Person,pid)
         if not p or 'Professor' not in roles_for(p): fail('Selecione um professor.')
-        rows=data.get('lessons',[]); subjects=p.details.get('subjects_by_class',{})
+        rows=data.get('lessons',[])
+        subjects=clean_subjects(data['subjects']) if 'subjects' in data else p.details.get('subjects_by_class',{})
+        if not isinstance(rows,list): fail('Confira as aulas da grade.')
+        counts={}; normalized=[]
+        weekdays=['Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado','Domingo']
         for row in rows:
+            if not isinstance(row,dict): fail('Confira os dados da aula.')
             day=str(row.get('day'))
+            if day not in list(map(str,range(7))): fail('Selecione o dia da semana da aula.')
+            counts[day]=counts.get(day,0)+1
+            label=f'{weekdays[int(day)]}, {counts[day]}ª aula'
             try: valid_time=minutes(row.get('start'))<minutes(row.get('end'))
             except Exception: valid_time=False
-            if row.get('class') not in CLASSES or day not in list(map(str,range(7))) or row.get('subject') not in subjects.get(row.get('class'),[]) or not valid_time: fail('Confira dia, horário, Turma e Matéria da aula.')
-        before=p.details; p.details={**p.details,'lessons':rows}
+            if not valid_time: fail(f'{label}: confira início e fim. O fim deve ser depois do início.')
+            if row.get('class') not in CLASSES: fail(f'{label}: selecione uma Turma válida.')
+            subject=str(row.get('subject','')).strip()[:80]
+            if subject not in subjects.get(row.get('class'),[]): fail(f'{label}: selecione uma Matéria cadastrada para {row.get("class")}.')
+            normalized.append({**row,'day':day,'subject':subject})
+        before=p.details; p.details={**p.details,'lessons':normalized,'subjects_by_class':subjects}
         audit(db,actor,'Alterar grade pedagógica',pid,before,p.details); return {'ok':True}
 
 @app.put('/api/people/{pid}/subjects')
@@ -355,14 +379,7 @@ def subjects(pid:int,request:Request,data:dict=Body(...)):
     with transaction() as db:
         actor=current(db,request); require(actor,ADMIN); person=db.get(Person,pid)
         if not person or 'Professor' not in roles_for(person): fail('Selecione um professor.')
-        result={}
-        for classroom,values in data.get('subjects',{}).items():
-            if classroom not in CLASSES: fail('Confira a turma.')
-            clean=[]
-            for value in values:
-                subject=str(value).strip()[:80]
-                if subject and subject not in clean: clean.append(subject)
-            if clean: result[classroom]=clean
+        result=clean_subjects(data.get('subjects',{}))
         before=person.details; person.details={**person.details,'subjects_by_class':result}
         audit(db,actor,'Alterar matérias do professor',pid,before,person.details)
         return {'subjects':result}

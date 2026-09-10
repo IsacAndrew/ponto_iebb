@@ -406,3 +406,22 @@ def test_teacher_export_and_notebook_location(client):
         assert user.get('/api/reports/teachers').status_code==403
         assert punch(user,lat=-23.68,lon=-46.77,accuracy=400).status_code==422
         assert punch(user,lat=-23.67637077,lon=-46.76243126,accuracy=400).status_code==200
+
+
+def test_grade_saves_new_subjects_atomically(client):
+    pid=add_person(login='newgrade')
+    lesson={'day':'0','start':'07:10','end':'08:00','class':'1º Ano A','subject':'Português'}
+    # A matéria aparece na tela antes de ser salva separadamente.
+    response=client.put(f'/api/people/{pid}/lessons',json={'lessons':[lesson]})
+    assert response.status_code==400 and 'Segunda-feira, 1ª aula' in response.json()['detail']
+    subjects={'1º Ano A':['Português']}
+    assert client.put(f'/api/people/{pid}/lessons',json={'lessons':[lesson],'subjects':subjects}).status_code==200
+    with transaction() as db:
+        saved=db.get(Person,pid).details
+        assert saved['lessons']==[lesson] and saved['subjects_by_class']==subjects
+    invalid={**lesson,'day':'1','end':'06:00'}
+    response=client.put(f'/api/people/{pid}/lessons',json={'lessons':[lesson,invalid],'subjects':{'1º Ano A':['Português','Arte']}})
+    assert response.status_code==400 and 'Terça-feira, 1ª aula' in response.json()['detail']
+    with transaction() as db:
+        saved=db.get(Person,pid).details
+        assert saved['lessons']==[lesson] and saved['subjects_by_class']==subjects
