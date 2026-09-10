@@ -425,3 +425,12 @@ def test_grade_saves_new_subjects_atomically(client):
     with transaction() as db:
         saved=db.get(Person,pid).details
         assert saved['lessons']==[lesson] and saved['subjects_by_class']==subjects
+
+
+def test_people_indicates_registered_schedule(client):
+    missing=add_person(login='missing');empty=add_person(login='empty');registered=add_person(login='registered')
+    set_schedule(empty,[]);set_schedule(registered,[['07:10','12:30']],day='2026-10-01')
+    rows={row['id']:row for row in client.get('/api/people').json()}
+    assert rows[missing]['has_schedule'] is False
+    assert rows[empty]['has_schedule'] is False
+    assert rows[registered]['has_schedule'] is True

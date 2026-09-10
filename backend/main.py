@@ -256,7 +256,8 @@ def person_data(p): return {**public(p),'login':p.login}
 def people(request: Request):
     with reading() as db:
         require(current(db,request),ADMIN)
-        return [person_data(p) for p in db.scalars(select(Person).order_by(Person.name))]
+        scheduled={pid for pid,days in db.execute(select(Schedule.person_id,Schedule.days)) if any(days.values())}
+        return [{**person_data(p),'has_schedule':p.id in scheduled} for p in db.scalars(select(Person).order_by(Person.name))]
 def clean_person(data):
     name=str(data.get('name','')).strip(); login=str(data.get('login','')).strip().lower(); role=data.get('role')
     if not name or len(name)>160 or not login or len(login)>100 or role not in ROLES: fail('Preencha nome, login e perfil válidos.')
