@@ -99,7 +99,7 @@ def test_geofence_and_permissions(client):
     with TestClient(app) as c:
         c.headers['X-Ponto']='1';c.post('/api/login',json={'login':'professor','password':'definitiva1'})
         assert c.post('/api/punch',json={'key':uuid.uuid4().hex}).status_code==422
-        assert punch(c,lat=-23.67637077,lon=-46.76243126,accuracy=400).status_code==422
+        assert punch(c,lat=-23.67637077,lon=-46.76243126,accuracy=501).status_code==422
         assert punch(c,lat=-23.68,lon=-46.77,accuracy=10).status_code==422
         assert punch(c,lat=-23.67637077,lon=-46.76243126,accuracy=10).status_code==200
         assert c.post('/api/absence',json={'person_id':pid,'date':'2026-09-03','absent':True}).status_code==403
@@ -388,3 +388,21 @@ def test_one_login_can_choose_professor_or_administrator(client,monkeypatch):
     workbook=load_workbook(BytesIO(client.post('/api/month/2026-09/export',json={'password':'definitiva1'}).content))
     names=[cell.value for cell in workbook['Pontos - Geral']['C']]
     assert 'Pessoa edson (Professor)' in names
+
+
+def test_teacher_export_and_notebook_location(client):
+    pid=add_person(login='exportteacher')
+    with transaction() as session:
+        person=session.get(Person,pid)
+        person.details={'subjects_by_class':{'1º Ano A':['Português','Matemática'],'2º Ano A':['Arte']}}
+    response=client.get('/api/reports/teachers')
+    assert response.status_code==200
+    wb=load_workbook(BytesIO(response.content)); sheet=wb['Professores']
+    assert list(sheet.values)==[('Professor','Turma','Matéria'),('Pessoa exportteacher','1º Ano A','Português'),('Pessoa exportteacher','1º Ano A','Matemática'),('Pessoa exportteacher','2º Ano A','Arte')]
+    assert sheet.auto_filter.ref=='A1:C4'
+    set_schedule(pid,[['07:00','15:00']])
+    with TestClient(app) as user:
+        user.headers['X-Ponto']='1';user.post('/api/login',json={'login':'exportteacher','password':'definitiva1'})
+        assert user.get('/api/reports/teachers').status_code==403
+        assert punch(user,lat=-23.68,lon=-46.77,accuracy=400).status_code==422
+        assert punch(user,lat=-23.67637077,lon=-46.76243126,accuracy=400).status_code==200

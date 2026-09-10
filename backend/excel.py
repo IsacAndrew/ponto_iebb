@@ -60,3 +60,19 @@ def export_month(db,month,closing):
                 c.alignment=Alignment(vertical='center')
                 if c.fill.patternType is None and c.row%2==0: c.fill=PatternFill('solid',fgColor='F1F5F9')
     output=BytesIO(); wb.save(output); return output.getvalue()
+
+
+def export_teachers(db):
+    from .rules import roles_for, CLASSES
+    wb=Workbook(); sheet=wb.active; sheet.title='Professores'
+    sheet.append(['Professor','Turma','Matéria'])
+    for person in db.scalars(select(Person).where(Person.active==True).order_by(Person.name)):
+        if 'Professor' not in roles_for(person): continue
+        subjects=person.details.get('subjects_by_class',{})
+        entries=[(classroom,subject) for classroom in CLASSES for subject in subjects.get(classroom,[])]
+        for classroom,subject in entries or [('', '')]: sheet.append([safe(person.name),safe(classroom),safe(subject)])
+    sheet.freeze_panes='A2'; sheet.auto_filter.ref=sheet.dimensions
+    for cell in sheet[1]:
+        cell.font=Font(bold=True,color='FFFFFF'); cell.fill=PatternFill('solid',fgColor='18334F')
+    for column,width in [('A',38),('B',24),('C',30)]: sheet.column_dimensions[column].width=width
+    output=BytesIO(); wb.save(output); return output.getvalue()

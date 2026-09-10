@@ -21,7 +21,7 @@ async def lifespan(app):
             if os.getenv('RENDER') and not os.getenv('BOOTSTRAP_PASSWORD'): raise RuntimeError('Defina BOOTSTRAP_PASSWORD no primeiro deploy.')
             db.add(Person(name='Isac',login=login,password=password_hash(os.getenv('BOOTSTRAP_PASSWORD','102030')),role='Suporte',hired=today(),details={},session={}))
         if not db.get(Setting,'geo'):
-            db.add(Setting(key='geo',data={'lat':-23.67637077,'lon':-46.76243126,'verified':False,'accuracy':100}))
+            db.add(Setting(key='geo',data={'lat':-23.67637077,'lon':-46.76243126,'verified':False,'accuracy':500,'accuracy_version':2}))
     yield
 
 app=FastAPI(title='Livro-Ponto',lifespan=lifespan)
@@ -165,6 +165,9 @@ def punch_today(request: Request):
     with reading() as db:
         p=current(db,request)
         return {**summarize(db,p,today()),'now':now().isoformat(),'location_required':location_required(db,p),'geo_ready':bool(db.get(Setting,'geo') and db.get(Setting,'geo').data.get('verified'))}
+def location_accuracy(geo):
+    return geo.get('accuracy',500) if geo.get('accuracy_version')==2 else 500
+
 def process_punch(db,p,data,source='site'):
     if effective_role(p)=='Diretoria': fail('Este perfil não tem jornada obrigatória.')
     d=today(); unlocked(db,d)
@@ -195,7 +198,7 @@ def process_punch(db,p,data,source='site'):
         try: lat,lon,accuracy=[float(data[k]) for k in ('lat','lon','accuracy')]
         except (KeyError,ValueError,TypeError): fail('Permita a localização para registrar o ponto.',422)
         if not all(math.isfinite(x) for x in (lat,lon,accuracy)) or abs(lat)>90 or abs(lon)>180 or accuracy<0: fail('Localização inválida.',422)
-        if accuracy>geo.get('accuracy',100): fail(f'Este aparelho informou precisão de {round(accuracy)} m; o limite é {geo.get("accuracy",100)} m. Não foi possível confirmar sua presença na escola. Ative a localização precisa do sistema ou use um aparelho com melhor localização.',422)
+        if accuracy>location_accuracy(geo): fail(f'Este aparelho informou precisão de {round(accuracy)} m; o limite é {location_accuracy(geo)} m. Não foi possível confirmar sua presença na escola. Ative a localização precisa do sistema ou use um aparelho com melhor localização.',422)
         meters=distance(lat,lon,geo['lat'],geo['lon'])
         if meters>100: fail(f'Você está a {round(meters)} m da escola. Aproxime-se para registrar.',422)
         location={'lat':lat,'lon':lon,'accuracy':accuracy,'distance':round(meters,1)}
@@ -585,18 +588,18 @@ def settings(request:Request):
     with reading() as db:
         require(current(db,request),FULL_ACCESS)
         row=db.get(Setting,'geo')
-        return row.data if row else {'lat':-23.67637077,'lon':-46.76243126,'accuracy':100,'verified':False}
+        return {**row.data,'accuracy':location_accuracy(row.data)} if row else {'lat':-23.67637077,'lon':-46.76243126,'accuracy':500,'verified':False}
 @app.put('/api/support/settings')
 def save_settings(request:Request,data:dict=Body(...)):
     with transaction() as db:
         actor=current(db,request); require(actor,FULL_ACCESS)
         try: lat,lon,accuracy=float(data['lat']),float(data['lon']),float(data['accuracy'])
         except (KeyError,ValueError,TypeError): fail('Confira as coordenadas e a precisão.')
-        if not all(math.isfinite(v) for v in [lat,lon,accuracy]) or not -90<=lat<=90 or not -180<=lon<=180 or not 1<=accuracy<=100: fail('Confira as coordenadas e a precisão máxima (1 a 100 m).')
+        if not all(math.isfinite(v) for v in [lat,lon,accuracy]) or not -90<=lat<=90 or not -180<=lon<=180 or not 1<=accuracy<=500: fail('Confira as coordenadas e a precisão máxima (1 a 500 m).')
         row=db.get(Setting,'geo')
         if not row: row=Setting(key='geo',data={}); db.add(row)
         before=row.data
-        row.data={'lat':lat,'lon':lon,'accuracy':accuracy,'verified':data.get('verified',before.get('verified',False)) is True}
+        row.data={'lat':lat,'lon':lon,'accuracy':accuracy,'accuracy_version':2,'verified':data.get('verified',before.get('verified',False)) is True}
         audit(db,actor,'Configurar localização','geo',before,row.data,'Confirmação do Suporte')
         return row.data
 
@@ -649,6 +652,12 @@ def reopen(month:str,request:Request,data:dict=Body(...)):
         if not reason: fail('Informe o motivo da reabertura.')
         before=row.data; row.data={**before,'closed':False,'reopened_by':actor.name,'reopened_at':now().isoformat()}
         audit(db,actor,'Reabrir mês',month,before,row.data,reason); return row.data
+@app.get('/api/reports/teachers')
+def teachers_report(request:Request):
+    from .excel import export_teachers
+    with reading() as db:
+        require(current(db,request),ADMIN); binary=export_teachers(db)
+    return Response(binary,media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':'attachment; filename="Professores.xlsx"'})
 @app.get('/api/audit')
 def audit_list(request:Request,month:str):
     valid_date(month+'-01')
