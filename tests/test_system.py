@@ -491,3 +491,25 @@ def test_reset_clears_legacy_and_rolls_back_on_failure(client,monkeypatch):
         session.execute(text('DROP TABLE usuarios'))
         session.execute(text('DROP TABLE unrelated'))
     assert client.post('/api/login',json={'login':'suporte','password':'definitiva1'}).status_code==200
+
+
+def test_synthetic_storage_data_is_bounded_and_removed(client,monkeypatch):
+    monkeypatch.setenv('DB_STORAGE_LIMIT_MB','1')
+    pid=add_person(login='storage_teacher')
+    with TestClient(app) as teacher:
+        teacher.headers['X-Ponto']='1';teacher.post('/api/login',json={'login':'storage_teacher','password':'definitiva1'})
+        assert teacher.post('/api/system/storage-test',json={}).status_code==403
+    response=client.post('/api/system/storage-test',json={})
+    assert response.status_code==200
+    size=response.json()['created_bytes']
+    assert 0.012*1048576<=size<0.012*1048576+1
+    with transaction() as session:
+        rows=list(session.scalars(select(Setting).where(Setting.key.like('storage-test:%'))))
+        assert sum(len(row.data['payload']) for row in rows)==size
+        assert all(row.data['synthetic'] for row in rows)
+        assert session.get(Person,pid) is not None
+    assert client.get('/api/system/storage').json()['test_data'] is True
+    assert client.post('/api/system/storage-test',json={}).status_code==409
+    assert client.post('/api/system/reset',json={'password':'definitiva1','confirmation':'APAGAR'}).status_code==200
+    with transaction() as session:
+        assert session.scalar(select(Setting).where(Setting.key.like('storage-test:%'))) is None

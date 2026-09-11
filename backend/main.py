@@ -627,7 +627,8 @@ def storage(request:Request):
         else:
             path=Path(db.bind.url.database); used=path.stat().st_size if path.exists() else 0
         limit=max(1,int(os.getenv('DB_STORAGE_LIMIT_MB','500')))*1024*1024
-        return {'used_bytes':used,'limit_bytes':limit,'percent':round(min(100,used*100/limit),2)}
+        test_data=bool(db.scalar(select(Setting.key).where(Setting.key.like('storage-test:%')).limit(1)))
+        return {'used_bytes':used,'limit_bytes':limit,'percent':round(min(100,used*100/limit),2),'test_data':test_data}
 @app.post('/api/month/{month}/export')
 def export(month:str,request:Request):
     valid_date(month+'-01')
@@ -636,6 +637,24 @@ def export(month:str,request:Request):
         require(current(db,request),ADMIN)
         binary=export_month(db,month)
     return Response(binary,media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename="Ponto_{month}.xlsx"'})
+
+@app.post('/api/system/storage-test')
+def create_storage_test(request:Request):
+    with transaction() as db:
+        actor=current(db,request); require(actor,['Suporte'])
+        if db.scalar(select(Setting.key).where(Setting.key.like('storage-test:%')).limit(1)):
+            fail('Os dados de teste já foram criados. Faça a limpeza antes de gerar novamente.',409)
+        limit=max(1,int(os.getenv('DB_STORAGE_LIMIT_MB','500')))*1024*1024
+        target=math.ceil(limit*0.012)
+        if target>32*1024*1024: fail('Este teste é limitado a 32 MB. O limite configurado do banco é alto demais para simular 1%.')
+        remaining=target; index=0
+        while remaining:
+            size=min(65536,remaining)
+            payload=secrets.token_urlsafe(math.ceil(size*3/4))[:size]
+            db.add(Setting(key=f'storage-test:{index}',data={'synthetic':True,'payload':payload}))
+            remaining-=size; index+=1
+        audit(db,actor,'Gerar dados de teste de armazenamento','sistema',after={'bytes':target},reason='Teste de limpeza solicitado pelo Suporte')
+    return {'created_bytes':target}
 
 @app.post('/api/system/reset')
 def reset_system(request:Request,data:dict=Body(...)):
