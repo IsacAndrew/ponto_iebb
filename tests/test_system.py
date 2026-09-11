@@ -459,3 +459,35 @@ def test_database_reset_requires_support_and_confirmation(client):
         assert list(db.scalars(select(Setting.key)))==['mutex']
         assert list(db.scalars(select(Audit.action)))==['Apagar dados do sistema']
     assert client.post('/api/login',json={'login':'suporte','password':'definitiva1'}).status_code==200
+
+
+def test_reset_clears_legacy_and_rolls_back_on_failure(client,monkeypatch):
+    from sqlalchemy import text
+    pid=add_person(login='preserved_on_failure')
+    with transaction() as session:
+        session.execute(text('CREATE TABLE usuarios (id INTEGER PRIMARY KEY, nome TEXT)'))
+        session.execute(text('CREATE TABLE registros_ponto (id INTEGER PRIMARY KEY, usuario_id INTEGER REFERENCES usuarios(id))'))
+        session.execute(text('CREATE TABLE unrelated (id INTEGER PRIMARY KEY)'))
+        session.execute(text("INSERT INTO usuarios VALUES (1, 'Antigo')"))
+        session.execute(text('INSERT INTO registros_ponto VALUES (1, 1)'))
+        session.execute(text('INSERT INTO unrelated VALUES (1)'))
+    original=main.audit
+    def reject(*args,**kwargs): raise RuntimeError('Falha simulada antes de confirmar a limpeza')
+    monkeypatch.setattr(main,'audit',reject)
+    response=client.post('/api/system/reset',json={'password':'definitiva1','confirmation':'APAGAR'})
+    assert response.status_code==500
+    with transaction() as session:
+        assert session.get(Person,pid) is not None
+        assert session.scalar(text('SELECT count(*) FROM usuarios'))==1
+        assert session.scalar(text('SELECT count(*) FROM registros_ponto'))==1
+    monkeypatch.setattr(main,'audit',original)
+    assert client.post('/api/system/reset',json={'password':'definitiva1','confirmation':'APAGAR'}).status_code==200
+    with transaction() as session:
+        assert session.get(Person,pid) is None
+        assert session.scalar(text('SELECT count(*) FROM usuarios'))==0
+        assert session.scalar(text('SELECT count(*) FROM registros_ponto'))==0
+        assert session.scalar(text('SELECT count(*) FROM unrelated'))==1
+        session.execute(text('DROP TABLE registros_ponto'))
+        session.execute(text('DROP TABLE usuarios'))
+        session.execute(text('DROP TABLE unrelated'))
+    assert client.post('/api/login',json={'login':'suporte','password':'definitiva1'}).status_code==200

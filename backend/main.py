@@ -643,10 +643,8 @@ def reset_system(request:Request,data:dict=Body(...)):
         actor=current(db,request); require(actor,['Suporte'])
         confirm(actor,data.get('password',''))
         if data.get('confirmation')!='APAGAR': fail('Digite APAGAR para confirmar.')
-        for model in (Item,Day,Schedule,Audit): db.execute(model.__table__.delete())
-        db.execute(Setting.__table__.delete().where(Setting.key!='mutex'))
-        db.execute(Person.__table__.delete().where(Person.id!=actor.id))
-        actor.role='Suporte'; actor.details={}; actor.session={}
+        from .reset import clear_system_data
+        actor=clear_system_data(db,actor)
         audit(db,actor,'Apagar dados do sistema','sistema',after={'preserved_account':actor.id},reason='Limpeza confirmada pelo Suporte')
     response=JSONResponse({'ok':True}); response.delete_cookie('ponto_session'); return response
 
