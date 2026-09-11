@@ -11,7 +11,7 @@ from .rules import summarize
 
 def safe(value):
     return "'"+value if isinstance(value,str) and value.startswith(('=','+','-','@')) else value
-def export_month(db,month,closing):
+def export_month(db,month):
     year,number=map(int,month.split('-')); rows=[]
     for p in db.scalars(select(Person).order_by(Person.name)):
         for n in range(1,monthrange(year,number)[1]+1):
@@ -42,14 +42,14 @@ def export_month(db,month,closing):
     import json
     for a in db.scalars(select(Audit).order_by(Audit.id)):
         if month in a.target or a.at.startswith(month): sheet.append([a.at,safe(a.actor),a.action,a.target,safe(json.dumps(a.before,ensure_ascii=False)),safe(json.dumps(a.after,ensure_ascii=False)),safe(a.reason)])
-    wb.properties.title=f'Livro-Ponto {month} — versão {closing["version"]}'
-    wb.properties.description=f'Fechado por {closing["by"]} em {closing["at"]}. Minutos inteiros. Saldo exclui dias sem apuração completa. Extras dependem de validação.'
+    wb.properties.title=f'Livro-Ponto {month}'
+    wb.properties.description='Minutos inteiros. Saldo exclui dias sem apuração completa. Extras dependem de validação.'
     for sheet in wb:
         sheet.freeze_panes='E2' if sheet==ws else 'C2'; sheet.auto_filter.ref=sheet.dimensions
         sheet.sheet_view.showGridLines=False
         sheet.print_title_rows='1:1'; sheet.page_setup.orientation='landscape'; sheet.page_setup.paperSize=sheet.PAPERSIZE_A4
         sheet.page_setup.fitToWidth=1; sheet.sheet_properties.pageSetUpPr.fitToPage=True
-        sheet.oddFooter.center.text=f'{month} • versão {closing["version"]} • &P / &N'
+        sheet.oddFooter.center.text=f'{month} • &P / &N'
         sheet.row_dimensions[1].height=42
         for cell in sheet[1]:
             cell.font=Font(name='Calibri',size=11,bold=True,color='FFFFFF'); cell.fill=PatternFill('solid',fgColor='18334F'); cell.alignment=Alignment(wrap_text=True,vertical='center')

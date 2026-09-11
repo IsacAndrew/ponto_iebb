@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from .db import ROOT, init, transaction, reading, Person, Schedule, Day, Item, Setting, Audit, audit, now, today
-from .rules import ROLES, ADMIN, CLASSES, fail, minutes, valid_date, validate_days, schedule_for, holiday, unlocked, get_day, summarize, distance, suspect_missing, roles_for, effective_role
+from .rules import ROLES, ADMIN, CLASSES, fail, minutes, valid_date, validate_days, schedule_for, holiday, get_day, summarize, distance, suspect_missing, roles_for, effective_role
 from .security import password_hash, verify, digest, cookie, current, require, confirm, public, FULL_ACCESS
 
 @asynccontextmanager
@@ -170,7 +170,7 @@ def location_accuracy(geo):
 
 def process_punch(db,p,data,source='site'):
     if effective_role(p)=='Diretoria': fail('Este perfil não tem jornada obrigatória.')
-    d=today(); unlocked(db,d)
+    d=today()
     row=get_day(db,p,d,True)
     if not row.punches: row.periods=schedule_for(db,p,d)
     punches=list(row.punches)
@@ -310,7 +310,7 @@ def deactivate(pid:int,request: Request,data: dict=Body(...)):
         if not p: fail('Pessoa não encontrada.',404)
         editable(actor,p)
         if p.id==actor.id: fail('Você não pode desativar sua própria conta.')
-        d=valid_date(data.get('date',today())); unlocked(db,d)
+        d=valid_date(data.get('date',today()))
         if d>today() or d<p.hired: fail('Informe uma data entre a admissão e hoje.')
         if db.scalar(select(Day.key).where(Day.person_id==pid,Day.date>d)): fail('Existem registros após essa data. Use a data do último dia trabalhado.')
         p.active=False; p.terminated=d; p.session={}
@@ -332,7 +332,6 @@ def add_schedule(pid:int,request: Request,data: dict=Body(...)):
         row=get_day(db,p,d)
         if d==today() and row and row.punches:
             d=(date.fromisoformat(d)+timedelta(days=1)).isoformat()
-        unlocked(db,d)
         db.add(Schedule(person_id=pid,effective=d,days=days,specific=specific))
         if row and not row.punches and row.date==d: row.periods=days.get(str(date.fromisoformat(d).weekday()),[])
         audit(db,actor,'Alterar jornada',f'{pid}:{d}',after={'days':days,'specific':specific},reason=data.get('reason','Nova vigência'))
@@ -410,7 +409,7 @@ def attendance(request: Request,day:str):
 @app.post('/api/absence')
 def absence(request: Request,data:dict=Body(...)):
     with transaction() as db:
-        actor=current(db,request); require(actor,ADMIN); d=valid_date(data.get('date')); unlocked(db,d)
+        actor=current(db,request); require(actor,ADMIN); d=valid_date(data.get('date'))
         p=db.get(Person,data.get('person_id'))
         if not p: fail('Pessoa não encontrada.',404)
         row=get_day(db,p,d,True); before={'absent':row.absent}
@@ -421,7 +420,6 @@ def absence(request: Request,data:dict=Body(...)):
         return {'ok':True}
 
 def apply_correction(db,actor,p,d,times,reason):
-    unlocked(db,d)
     if not reason.strip(): fail('Informe o motivo.')
     if d>today(): fail('Não é possível corrigir uma data futura.')
     if d<p.hired or p.terminated and d>p.terminated: fail('Data fora do vínculo da pessoa.')
@@ -471,7 +469,7 @@ def new_request(request:Request,data:dict=Body(...)):
         kind=data.get('type')
         if kind not in ('point','profile') or not str(data.get('reason','')).strip(): fail('Informe a alteração e o motivo.')
         if kind=='point':
-            d=valid_date(data.get('date')); unlocked(db,d)
+            d=valid_date(data.get('date'))
             for t in data.get('times',[]): minutes(t)
             before={'punches':summarize(db,p,d)['punches']}
         else:
@@ -520,7 +518,6 @@ def resolve(rid:int,request:Request,data:dict=Body(...)):
     with transaction() as db:
         actor=current(db,request); require(actor,['Suporte']); r=db.get(Item,rid)
         if not r or r.kind!='occurrence' or r.status!='Pendente': fail('Ocorrência não está pendente.')
-        unlocked(db,r.date)
         reason=str(data.get('reason','')).strip()
         if not reason: fail('Informe o resultado da análise.')
         if r.data.get('title')=='Hora extra pendente':
@@ -594,7 +591,7 @@ def calendar(request:Request):
 @app.post('/api/calendar')
 def save_holiday(request:Request,data:dict=Body(...)):
     with transaction() as db:
-        actor=current(db,request); require(actor,ADMIN); d=valid_date(data.get('date')); unlocked(db,d)
+        actor=current(db,request); require(actor,ADMIN); d=valid_date(data.get('date'))
         name=str(data.get('name','')).strip(); row=db.get(Setting,'holiday:'+d); before=row.data if row else {}
         if not name:
             if row: db.delete(row)
@@ -631,45 +628,28 @@ def storage(request:Request):
             path=Path(db.bind.url.database); used=path.stat().st_size if path.exists() else 0
         limit=max(1,int(os.getenv('DB_STORAGE_LIMIT_MB','500')))*1024*1024
         return {'used_bytes':used,'limit_bytes':limit,'percent':round(min(100,used*100/limit),2)}
-@app.get('/api/month/{month}')
-def month_status(month:str,request:Request):
-    valid_date(month+'-01')
-    with reading() as db:
-        require(current(db,request),ADMIN); row=db.get(Setting,'month:'+month)
-        return row.data if row else {'closed':False,'version':0}
 @app.post('/api/month/{month}/export')
-def export(month:str,request:Request,data:dict=Body(...)):
+def export(month:str,request:Request):
     valid_date(month+'-01')
     from .excel import export_month
-    with transaction() as db:
-        actor=current(db,request); require(actor,ADMIN); row=db.get(Setting,'month:'+month)
-        if not row: row=Setting(key='month:'+month,data={'closed':False,'version':0}); db.add(row)
-        if not row.data.get('closed'):
-            if month>today()[:7]: fail('Não é possível fechar um mês futuro.')
-            confirm(actor,data.get('password',''))
-            before=row.data
-            row.data={'closed':True,'version':before.get('version',0)+1,'by':actor.name,'at':now().isoformat()}
-            audit(db,actor,'Fechar mês',month,before,row.data)
-        db.flush()
-        key=f'export:{month}:{row.data["version"]}'
-        snapshot=db.get(Setting,key)
-        if snapshot:
-            binary=base64.b64decode(snapshot.data['xlsx'])
-        else:
-            binary=export_month(db,month,row.data)
-            db.add(Setting(key=key,data={'xlsx':base64.b64encode(binary).decode()}))
+    with reading() as db:
+        require(current(db,request),ADMIN)
+        binary=export_month(db,month)
     return Response(binary,media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename="Ponto_{month}.xlsx"'})
-@app.post('/api/month/{month}/reopen')
-def reopen(month:str,request:Request,data:dict=Body(...)):
-    valid_date(month+'-01')
+
+@app.post('/api/system/reset')
+def reset_system(request:Request,data:dict=Body(...)):
     with transaction() as db:
-        actor=current(db,request); require(actor,['Diretoria','Suporte']); confirm(actor,data.get('password',''))
-        row=db.get(Setting,'month:'+month)
-        if not row or not row.data.get('closed'): fail('O mês já está aberto.')
-        reason=str(data.get('reason','')).strip()
-        if not reason: fail('Informe o motivo da reabertura.')
-        before=row.data; row.data={**before,'closed':False,'reopened_by':actor.name,'reopened_at':now().isoformat()}
-        audit(db,actor,'Reabrir mês',month,before,row.data,reason); return row.data
+        actor=current(db,request); require(actor,['Suporte'])
+        confirm(actor,data.get('password',''))
+        if data.get('confirmation')!='APAGAR': fail('Digite APAGAR para confirmar.')
+        for model in (Item,Day,Schedule,Audit): db.execute(model.__table__.delete())
+        db.execute(Setting.__table__.delete().where(Setting.key!='mutex'))
+        db.execute(Person.__table__.delete().where(Person.id!=actor.id))
+        actor.role='Suporte'; actor.details={}; actor.session={}
+        audit(db,actor,'Apagar dados do sistema','sistema',after={'preserved_account':actor.id},reason='Limpeza confirmada pelo Suporte')
+    response=JSONResponse({'ok':True}); response.delete_cookie('ponto_session'); return response
+
 @app.get('/api/reports/teachers')
 def teachers_report(request:Request):
     from .excel import export_teachers

@@ -113,7 +113,7 @@ def test_schedule_history_immutable(client,monkeypatch):
     at(monkeypatch,'2026-09-04T08:00:00');assert client.get('/api/punch/today').json()['periods']==[['08:00','16:00']]
     assert client.post('/api/people/1/schedules',json={'effective':'2026-08-03','days':{}}).status_code==400
 
-def test_close_reopen_excel_snapshot_and_holiday(client):
+def test_download_excel_without_closing_and_holiday(client):
     pid=add_person();set_schedule(pid,[['07:00','12:00'],['13:00','17:00'],['18:00','20:00']])
     assert client.post('/api/calendar',json={'date':'2026-08-04','name':'Feriado'}).status_code==200
     assert client.post('/api/absence',json={'person_id':pid,'date':'2026-08-03','absent':True}).status_code==200
@@ -124,13 +124,17 @@ def test_close_reopen_excel_snapshot_and_holiday(client):
     assert any(c.value=='FALTA REGISTRADA' for row in sheet for c in row)
     assert any(c.value=='Feriado' for row in sheet for c in row)
     assert sheet.merged_cells.ranges
-    assert client.post('/api/calendar',json={'date':'2026-08-04','name':''}).status_code==409
-    assert client.post('/api/corrections',json={'person_id':pid,'date':'2026-08-05','times':['07:00','12:00'],'reason':'Ajuste'}).status_code==409
-    assert client.post('/api/month/2026-08/export',json={}).content==first
-    assert client.post('/api/month/2026-08/reopen',json={'password':'definitiva1','reason':'Correção autorizada'}).status_code==200
+    with transaction() as db:
+        db.add(Setting(key='month:2026-08',data={'closed':True,'version':1}))
+        db.add(Setting(key='export:2026-08:1',data={'xlsx':'obsolete'}))
+    assert client.post('/api/calendar',json={'date':'2026-08-04','name':''}).status_code==200
     assert client.post('/api/corrections',json={'person_id':pid,'date':'2026-08-05','times':['07:00','12:00'],'reason':'Ajuste'}).status_code==200
-    assert client.post('/api/month/2026-08/export',json={'password':'definitiva1'}).status_code==200
-    assert client.get('/api/month/2026-08').json()['version']==2
+    updated=client.post('/api/month/2026-08/export')
+    assert updated.status_code==200
+    workbook=load_workbook(BytesIO(updated.content))
+    assert not any(c.value=='Feriado' for row in workbook['Pontos - Geral'] for c in row)
+    assert 'Fechado' not in workbook.properties.description
+    assert client.post('/api/month/2026-08/reopen',json={}).status_code in (404,405)
 
 def test_tickets_delete_and_requests_audit(client):
     pid=add_person()
@@ -434,3 +438,24 @@ def test_people_indicates_registered_schedule(client):
     assert rows[missing]['has_schedule'] is False
     assert rows[empty]['has_schedule'] is False
     assert rows[registered]['has_schedule'] is True
+
+
+def test_database_reset_requires_support_and_confirmation(client):
+    pid=add_person(login='resetteacher');set_schedule(pid,[['07:00','12:00']])
+    assert client.post('/api/absence',json={'person_id':pid,'date':'2026-08-03','absent':True}).status_code==200
+    with TestClient(app) as teacher:
+        teacher.headers['X-Ponto']='1';teacher.post('/api/login',json={'login':'resetteacher','password':'definitiva1'})
+        teacher.post('/api/tickets',json={'message':'Teste'})
+        assert teacher.post('/api/system/reset',json={'password':'definitiva1','confirmation':'APAGAR'}).status_code==403
+        assert client.post('/api/system/reset',json={'password':'errada','confirmation':'APAGAR'}).status_code==403
+        assert client.post('/api/system/reset',json={'password':'definitiva1','confirmation':''}).status_code==400
+        with transaction() as db: assert db.get(Person,pid) is not None
+        assert client.post('/api/system/reset',json={'password':'definitiva1','confirmation':'APAGAR'}).status_code==200
+        assert teacher.get('/api/me').status_code==401
+    assert client.get('/api/me').status_code==401
+    with transaction() as db:
+        assert list(db.scalars(select(Person.id)))==[1]
+        for model in (Day,Schedule,Item): assert db.scalar(select(model).limit(1)) is None
+        assert list(db.scalars(select(Setting.key)))==['mutex']
+        assert list(db.scalars(select(Audit.action)))==['Apagar dados do sistema']
+    assert client.post('/api/login',json={'login':'suporte','password':'definitiva1'}).status_code==200

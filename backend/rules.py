@@ -49,9 +49,6 @@ def holiday(db, day):
         row = db.get(Setting, 'holiday:' + day)
         cache[day] = row.data.get('name', '') if row else ''
     return cache[day]
-def unlocked(db, day):
-    row = db.get(Setting, 'month:' + day[:7])
-    if row and row.data.get('closed'): fail('Mês fechado. Diretoria ou Suporte podem reabrir o período.', 409)
 def get_day(db, person, day, create=False):
     row = db.get(Day, f'{person.id}:{day}')
     if not row and create:
