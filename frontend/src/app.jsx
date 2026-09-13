@@ -288,7 +288,7 @@ export default function App() {
   else if (page === "Falar com Suporte") content = <Chat {...ctx} />;
   else content = <Records {...ctx} />;
   return (
-    <div className="app">
+    <div className={admin ? "app" : "app employee-app"}>
       <a className="skip-link" href="#main-content">
         Pular para o conteúdo
       </a>

@@ -4,7 +4,6 @@ import {
   Check,
   MapPin,
   Clock3,
-  Coffee,
   ArrowUpRight,
   CalendarDays,
   CircleCheck,
@@ -139,12 +138,10 @@ export function Punch({ me, run, busy, notify, initial, onNavigate }) {
   return (
     <div className="punch-dashboard">
       <div className="greeting">
-        <span className="eyebrow">SUA ROTINA, EM DIA</span>
         <h1>
           Olá, {me.name.split(" ")[0]}
           <span className="greeting-dot">.</span>
         </h1>
-        <p>Acompanhe sua jornada e registre seu ponto por aqui.</p>
       </div>
       <div className="punch-grid">
         <section className="punch-card">
@@ -178,26 +175,6 @@ export function Punch({ me, run, busy, notify, initial, onNavigate }) {
             </div>
             <span className="timezone-label">Horário de Brasília</span>
           </div>
-          <div className="next-action">
-            <span className="next-icon">
-              {working ? <Coffee size={20} /> : <Fingerprint size={22} />}
-            </span>
-            <div>
-              <small>PRÓXIMO REGISTRO</small>
-              <strong>
-                {!day
-                  ? "Carregando jornada…"
-                  : done
-                    ? working
-                      ? "Saída de hora extra"
-                      : expected.length
-                        ? "Jornada concluída"
-                        : "Sem jornada cadastrada"
-                    : labels[index]}
-              </strong>
-            </div>
-            {!done && day && <time>{expected[index]}</time>}
-          </div>
           <Button
             className={"primary punch-button " + (success ? "success" : "")}
             busy={submitting}
@@ -226,12 +203,6 @@ export function Punch({ me, run, busy, notify, initial, onNavigate }) {
               </>
             )}
           </Button>
-          <p className="location-hint">
-            <MapPin size={15} />
-            {day?.location_required === false
-              ? "Localização dispensada para este acesso"
-              : "Localização verificada no momento do registro"}
-          </p>
           {done && !working && expected.length > 0 && (
             <button
               className="text-button extra-action"
@@ -253,6 +224,15 @@ export function Punch({ me, run, busy, notify, initial, onNavigate }) {
             </p>
           )}
         </section>
+      </div>
+      <details className="punch-details">
+        <summary>Consultar registros</summary>
+        <p className="location-hint">
+          <MapPin size={15} />
+          {day?.location_required === false
+            ? "Localização dispensada para este acesso"
+            : "Localização verificada no momento do registro"}
+        </p>
         <aside className="day-panel">
           <section className="sheet journey-card">
             <div className="section-heading">
@@ -302,39 +282,39 @@ export function Punch({ me, run, busy, notify, initial, onNavigate }) {
             <ArrowUpRight size={22} />
           </button>
         </aside>
-      </div>
-      <section className="day-stats" aria-label="Resumo do dia">
-        <div>
-          <span className="stat-icon">
-            <Clock3 size={20} />
-          </span>
+        <section className="day-stats" aria-label="Resumo do dia">
           <div>
-            <small>Horas trabalhadas</small>
-            <strong>{day ? hours(worked) : "—"}</strong>
+            <span className="stat-icon">
+              <Clock3 size={20} />
+            </span>
+            <div>
+              <small>Horas trabalhadas</small>
+              <strong>{day ? hours(worked) : "—"}</strong>
+            </div>
           </div>
-        </div>
-        <div>
-          <span className="stat-icon">
-            <CalendarDays size={20} />
-          </span>
           <div>
-            <small>Jornada prevista</small>
-            <strong>{day ? hours(day.planned) : "—"}</strong>
+            <span className="stat-icon">
+              <CalendarDays size={20} />
+            </span>
+            <div>
+              <small>Jornada prevista</small>
+              <strong>{day ? hours(day.planned) : "—"}</strong>
+            </div>
           </div>
-        </div>
-        <div>
-          <span className="stat-icon">
-            <CircleCheck size={20} />
-          </span>
           <div>
-            <small>Marcações realizadas</small>
-            <strong>
-              {day ? String(index).padStart(2, "0") : "—"}
-              <small> / {expected.length}</small>
-            </strong>
+            <span className="stat-icon">
+              <CircleCheck size={20} />
+            </span>
+            <div>
+              <small>Marcações realizadas</small>
+              <strong>
+                {day ? String(index).padStart(2, "0") : "—"}
+                <small> / {expected.length}</small>
+              </strong>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </details>
       {geo && (
         <section className="location-card" role="alert">
           <AlertCircle />

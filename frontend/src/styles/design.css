@@ -1555,3 +1555,54 @@ dialog::backdrop {
     overflow: visible;
   }
 }
+.punch-dashboard {
+  max-width: 520px;
+  margin: 0 auto;
+}
+.punch-dashboard .greeting {
+  text-align: center;
+}
+.punch-dashboard .punch-grid {
+  display: block;
+}
+.punch-details {
+  margin-top: 24px;
+}
+.punch-details > summary {
+  width: fit-content;
+  margin: 0 auto 20px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.875rem;
+  padding: 10px;
+}
+.punch-details > summary:focus-visible {
+  outline: 2px solid #286d50;
+  outline-offset: 3px;
+}
+.employee-app .sidebar {
+  visibility: hidden;
+  transform: translateX(-100%);
+  z-index: 50;
+}
+.employee-app .sidebar.open {
+  visibility: visible;
+  transform: translateX(0);
+}
+.employee-app .mobile {
+  display: inline-grid;
+}
+.employee-app .workspace {
+  margin-left: 0;
+}
+.employee-app .nav-shade {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #0005;
+  border: 0;
+}
+.employee-app .workspace-footer {
+  display: none;
+}

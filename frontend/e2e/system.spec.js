@@ -119,8 +119,13 @@ test("mobile: first access, geolocation, real punch and responsive navigation", 
   ).toBeVisible();
   await expect(page.getByText("Em expediente", { exact: true })).toBeVisible();
   await expect(
+    page.getByRole("heading", { name: "Sua jornada hoje" }),
+  ).not.toBeVisible();
+  await page.getByText("Consultar registros", { exact: true }).click();
+  await expect(
     page.locator(".day-stats").getByText("0h00", { exact: true }),
   ).toBeVisible();
+  await page.getByText("Consultar registros", { exact: true }).click();
   await page.screenshot({
     path: info.outputPath("mobile-ponto.png"),
     fullPage: true,
@@ -257,6 +262,11 @@ test("calendar is editable and an employee can change their password", async ({
   await expect(page.getByText("07/09/2026 · Independência")).toBeVisible();
   const person = await newPerson(playwright);
   await activate(page, person);
+  await expect(page.getByRole("navigation")).not.toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Registrar ponto", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Abrir menu" }).click();
   await page
     .getByRole("navigation")
     .getByRole("button", { name: "Meu perfil", exact: true })
@@ -271,6 +281,7 @@ test("calendar is editable and an employee can change their password", async ({
     .fill("changed-browser-password");
   await page.getByRole("button", { name: "Salvar nova senha" }).click();
   await expect(page.getByRole("status")).toContainText("Senha atualizada");
+  await page.getByRole("button", { name: "Abrir menu" }).click();
   await page.getByRole("button", { name: "Sair da conta" }).click();
   await login(page, person.login, "changed-browser-password");
   await expect(page.getByRole("heading", { name: "Olá, Ana." })).toBeVisible();
