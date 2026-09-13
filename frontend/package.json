@@ -1,0 +1,23 @@
+{
+  "name": "ponto-iebb",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "vite build",
+    "test:e2e": "playwright test",
+    "format": "prettier --write src index.html vite.config.js playwright.config.js e2e",
+    "format:check": "prettier --check src index.html vite.config.js playwright.config.js e2e"
+  },
+  "dependencies": {
+    "lucide-react": "1.45.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "prettier": "3.9.6",
+    "vite": "8.3.0"
+  }
+}

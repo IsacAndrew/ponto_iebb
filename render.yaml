@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: livro-ponto
+    runtime: docker
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: BOOTSTRAP_LOGIN
+        value: suporte
+      - key: BOOTSTRAP_PASSWORD
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_USE_TLS
+        value: "true"
+      - key: DB_STORAGE_LIMIT_MB
+        value: "500"
