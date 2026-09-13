@@ -67,8 +67,6 @@ def current(db, request: Request, allow_temporary=False, allow_unselected=False)
         or state.get("expires", 0) < time.time()
     ):
         fail("Entre novamente.", 401)
-    if person.temporary and not allow_temporary:
-        fail("Crie sua senha definitiva para continuar.", 403)
     if (
         len(roles_for(person)) > 1
         and state.get("active_role") not in roles_for(person)

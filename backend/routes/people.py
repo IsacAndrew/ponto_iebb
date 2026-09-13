@@ -1,4 +1,3 @@
-import secrets
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Body, Request
@@ -93,7 +92,7 @@ def add_person(request: Request, data: dict = Body(...)):
         if db.scalar(select(Person.id).where(Person.login == login)):
             fail("Este login já está em uso.")
         hired = valid_date(data.get("hired", today()))
-        credential = secrets.token_urlsafe(12)
+        credential = "102030"
         p = Person(
             name=name,
             login=login,
@@ -157,7 +156,7 @@ def reset(pid: int, request: Request):
         if not p:
             fail("Pessoa não encontrada.", 404)
         editable(actor, p)
-        credential = secrets.token_urlsafe(12)
+        credential = "102030"
         p.password = password_hash(credential)
         p.temporary = True
         p.session = {}

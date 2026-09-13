@@ -1606,3 +1606,11 @@ dialog::backdrop {
 .employee-app .workspace-footer {
   display: none;
 }
+.auth-layout {
+  display: flex;
+  justify-content: center;
+}
+.auth-layout .auth-form-side {
+  width: 100%;
+  max-width: 520px;
+}

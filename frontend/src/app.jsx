@@ -26,7 +26,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { api, SuccessToast } from "./ui";
-import { Login, FirstPassword, AccessChoice } from "./components/auth";
+import { Login, AccessChoice } from "./components/auth";
 import { Punch } from "./components/punch";
 const loadPage = (path, name) =>
   lazy(() => path().then((m) => ({ default: m[name] })));
@@ -52,16 +52,6 @@ const titles = {
   "Central de Suporte": "Ocorrências",
   Configurações: "Configurações",
   "Falar com Suporte": "Falar com o Suporte",
-};
-const subtitles = {
-  Usuários: "Cadastros, perfis e jornadas da equipe.",
-  Marcações: "Acompanhe a presença e os registros da escola.",
-  Excel: "Os dados da sua equipe, prontos para consultar.",
-  "Meus Registros": "Sua jornada registrada, dia após dia.",
-  Solicitações: "Acompanhe os pedidos de ajuste e suas decisões.",
-  "Central de Suporte": "Revise as situações que precisam de atenção.",
-  Configurações: "Organize as preferências da escola.",
-  "Meu Perfil": "Seus dados e sua jornada em um só lugar.",
 };
 export default function App() {
   const [me, setMe] = useState(null),
@@ -153,7 +143,7 @@ export default function App() {
     };
   }, [me?.id]);
   useEffect(() => {
-    if (me?.role !== "Suporte" || me.temporary || me.access_required) {
+    if (me?.role !== "Suporte" || me.access_required) {
       setUnread(0);
       return;
     }
@@ -178,12 +168,7 @@ export default function App() {
     setError("");
     setPage(r.user.role === "Diretoria" ? "Marcações" : "Ponto");
     const back = sessionStorage.getItem("ponto_qr_return");
-    if (
-      back &&
-      !r.user.temporary &&
-      !r.user.access_required &&
-      /^\/q\/[A-Za-z0-9_-]+$/.test(back)
-    ) {
+    if (back && !r.user.access_required && /^\/q\/[A-Za-z0-9_-]+$/.test(back)) {
       sessionStorage.removeItem("ponto_qr_return");
       location.assign(back);
     }
@@ -227,21 +212,11 @@ export default function App() {
       <div className="access-shell">
         <div className="loading-state" role="status">
           <Clock3 className="pulse" />
-          <p>Preparando sua jornada…</p>
+          <p>Carregando…</p>
         </div>
       </div>
     );
   if (!me) return <Login {...{ run, busy, error }} onLogin={choose} />;
-  if (me.temporary)
-    return (
-      <FirstPassword
-        {...{ run, busy, error, logout }}
-        refresh={async () => {
-          const r = await api("/me");
-          choose(r);
-        }}
-      />
-    );
   if (me.access_required)
     return <AccessChoice {...{ me, run, busy, error, choose, logout }} />;
   const admin = ["Administração", "Diretoria", "Suporte"].includes(me.role),
@@ -309,7 +284,6 @@ export default function App() {
           </span>
           <span>
             ponto<span className="brand-dot">.</span>
-            <small>IEBB · SUA JORNADA</small>
           </span>
         </a>
         <button
@@ -396,9 +370,6 @@ export default function App() {
             <strong>{titles[page] || "Meu ponto"}</strong>
           </div>
           <div className="header-right">
-            <span className="school-name">
-              Instituto Educacional Batista Bíblico
-            </span>
             <button
               className="header-avatar"
               onClick={() => change("Meu Perfil")}
@@ -425,13 +396,7 @@ export default function App() {
           )}
           {page !== "Ponto" && (
             <div className="greeting page-heading">
-              <span className="eyebrow">
-                {admin ? "GESTÃO E ROTINA" : "MEU ESPAÇO"}
-              </span>
               <h1>{titles[page] || page}</h1>
-              <p>
-                {subtitles[page] || "Tudo o que você precisa, em um só lugar."}
-              </p>
             </div>
           )}
           <Suspense
@@ -443,10 +408,6 @@ export default function App() {
           >
             <div key={me.id + ":" + me.role + ":" + page}>{content}</div>
           </Suspense>
-          <footer className="workspace-footer">
-            <span>Ponto IEBB</span>
-            <span>Feito para a nossa rotina · v3.0</span>
-          </footer>
         </main>
       </div>
       {toast && <SuccessToast message={toast} />}

@@ -173,7 +173,7 @@ def test_login_first_password_and_masked_profile(client):
         assert c.post(
             "/api/login", json={"login": "professor", "password": "102030"}
         ).json()["user"]["temporary"]
-        assert c.get("/api/punch/today").status_code == 403
+        assert c.get("/api/punch/today").status_code == 200
         assert (
             c.post(
                 "/api/password", json={"current": "102030", "password": "segura123"}
@@ -620,7 +620,7 @@ def test_admission_and_password_permission(client):
         assert c.get("/api/tickets?management=true").status_code == 403
 
 
-def test_temporary_password_requires_change_and_eight_characters(client):
+def test_temporary_password_allows_access_and_optional_change(client):
     pid = add_person(login="temporary")
     with transaction() as db:
         p = db.get(Person, pid)
@@ -635,7 +635,7 @@ def test_temporary_password_requires_change_and_eight_characters(client):
             == 200
         )
         assert c.get("/api/me").status_code == 200
-        assert c.get("/api/punch/today").status_code == 403
+        assert c.get("/api/punch/today").status_code == 200
         assert c.post("/api/password", json={"password": "abc"}).status_code == 400
         assert c.post("/api/password", json={"password": "aB12"}).status_code == 400
         assert c.post("/api/password", json={"password": "aB123456"}).status_code == 200

@@ -53,7 +53,7 @@ def test_malformed_schedule_is_rejected_without_server_error(client, days):
     assert result.status_code == 422
 
 
-def test_initial_credentials_are_unique_private_and_must_be_changed(client):
+def test_default_password_allows_access_and_optional_change(client):
     credentials = []
     for login in ["new-one", "new-two"]:
         result = client.post(
@@ -63,7 +63,7 @@ def test_initial_credentials_are_unique_private_and_must_be_changed(client):
         person = result.json()
         credential = person["initial_password"]
         credentials.append(credential)
-        assert len(credential) >= 12
+        assert credential == "102030"
         assert "initial_password" not in client.get("/api/people").text
         with transaction() as db:
             assert verify(credential, db.get(Person, person["id"]).password)
@@ -80,7 +80,7 @@ def test_initial_credentials_are_unique_private_and_must_be_changed(client):
             )
             assert (
                 user.get("/api/records?start=2026-09-03&end=2026-09-03").status_code
-                == 403
+                == 200
             )
             assert (
                 user.post("/api/password", json={"password": credential}).status_code
@@ -93,7 +93,7 @@ def test_initial_credentials_are_unique_private_and_must_be_changed(client):
                 == 200
             )
             assert user.get("/api/punch/today").status_code == 200
-    assert credentials[0] != credentials[1]
+    assert credentials == ["102030", "102030"]
 
 
 def test_reset_returns_a_new_credential_and_invalidates_session(client):

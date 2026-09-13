@@ -38,14 +38,6 @@ async function newPerson(playwright, role = "Professor") {
 }
 async function activate(page, person) {
   await login(page, person.login, person.initial_password);
-  await expect(
-    page.getByRole("heading", { name: "Uma senha só sua." }),
-  ).toBeVisible();
-  await page
-    .getByLabel("Nova senha", { exact: true })
-    .fill("my-browser-password");
-  await page.getByLabel("Confirmar nova senha").fill("my-browser-password");
-  await page.getByRole("button", { name: "Salvar e continuar" }).click();
   await expect(page.getByRole("heading", { name: "Olá, Ana." })).toBeVisible();
 }
 
@@ -142,9 +134,7 @@ test("mobile: first access, geolocation, real punch and responsive navigation", 
   await expect(page.locator(".page-heading h1")).toHaveText("Meu histórico");
 });
 
-test("admin: individual password remains visible after creation and reset", async ({
-  page,
-}) => {
+test("admin: default password after creation and reset", async ({ page }) => {
   await login(page);
   await page
     .getByRole("navigation")
@@ -164,7 +154,8 @@ test("admin: individual password remains visible after creation and reset", asyn
     .getByRole("button", { name: "Redefinir senha", exact: true })
     .click();
   await page.getByRole("button", { name: "Confirmar", exact: true }).click();
-  await expect(credential).not.toHaveText(first);
+  await expect(credential).toHaveText("102030");
+  expect(first).toBe("102030");
 });
 
 test("denied geolocation never confirms a punch", async ({
@@ -272,7 +263,7 @@ test("calendar is editable and an employee can change their password", async ({
     .getByRole("button", { name: "Meu perfil", exact: true })
     .click();
   await page.getByRole("button", { name: "Alterar minha senha" }).click();
-  await page.getByLabel("Senha atual").fill("my-browser-password");
+  await page.getByLabel("Senha atual").fill("102030");
   await page
     .getByLabel("Nova senha", { exact: true })
     .fill("changed-browser-password");

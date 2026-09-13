@@ -44,7 +44,7 @@ export function SettingsPage({ run, busy, notify, me }) {
     const w = window.open("", "_blank", "width=600,height=700");
     if (!w) return;
     w.document.write(
-      `<title>QR Code do ponto</title><style>body{text-align:center;font:18px Arial;padding:40px}h1{font-size:22px}img{width:380px}</style><h1>Ponto IEBB</h1><img alt="QR Code institucional" src="/api/system/qr/image?t=${Date.now()}">`,
+      `<title>QR Code do ponto</title><style>body{text-align:center;font:18px Arial;padding:40px}h1{font-size:22px}img{width:380px}</style><h1>Registrar ponto</h1><img alt="QR Code institucional" src="/api/system/qr/image?t=${Date.now()}">`,
     );
     w.document.close();
     const image = w.document.querySelector("img");

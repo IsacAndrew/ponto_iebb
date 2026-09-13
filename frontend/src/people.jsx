@@ -264,12 +264,9 @@ function PersonEditor({ person, close, run, busy, notify, me }) {
       <>
         {credential && (
           <div className="credential-box" role="status">
-            <strong>Senha temporária (exibida somente agora)</strong>
+            <strong>Senha inicial</strong>
             <code>{credential}</code>
-            <p>
-              Compartilhe com a pessoa. A troca será obrigatória no primeiro
-              acesso.
-            </p>
+            <p>A troca de senha é opcional em Meu perfil.</p>
           </div>
         )}
       </>
@@ -364,8 +361,7 @@ function PersonEditor({ person, close, run, busy, notify, me }) {
           </div>
           {!p.id && (
             <p className="muted">
-              Uma senha temporária individual será exibida ao salvar.
-              Compartilhe-a diretamente com a pessoa.
+              Senha inicial: 102030. Compartilhe-a diretamente com a pessoa.
             </p>
           )}
           <div className="actions">
@@ -844,10 +840,7 @@ function PersonEditor({ person, close, run, busy, notify, me }) {
           close={() => setConfirmAction(null)}
         >
           {confirmAction === "reset" ? (
-            <p>
-              Uma nova senha temporária individual será gerada. O acesso atual
-              será encerrado.
-            </p>
+            <p>A senha voltará a ser 102030. O acesso atual será encerrado.</p>
           ) : (
             <>
               <p>O login será desativado. O histórico permanece disponível.</p>

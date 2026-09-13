@@ -13,9 +13,9 @@ Python/FastAPI e interface React/JavaScript/CSS, com navegação adaptada a celu
 - Exportação de registros, resumos e professores para Excel.
 - Configurações de localização, QR, favicon e armazenamento.
 
-Novas contas recebem uma senha individual, exibida uma única vez ao responsável pelo
-cadastro. A pessoa precisa criar uma senha definitiva de 8 a 128 caracteres antes
-de acessar as demais funções. Senhas existentes continuam compatíveis.
+Novas contas e redefinições usam a senha padrão `102030`, por escolha da escola.
+A troca é opcional em Meu perfil; uma nova senha deve ter de 8 a 128 caracteres.
+Contas existentes mantêm suas senhas e podem acessar o ponto sem troca obrigatória.
 
 ## Executar no Linux
 
