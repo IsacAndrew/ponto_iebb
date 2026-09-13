@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { Moon, Sun } from "lucide-react";
+import { setTheme } from "../theme";
 
 import {
   api,
@@ -13,6 +15,15 @@ import {
 } from "../ui";
 
 export function Profile({ me, run, busy, notify, refresh }) {
+  const [dark, setDark] = useState(
+    document.documentElement.dataset.theme === "dark",
+  );
+  useEffect(() => {
+    const sync = () =>
+      setDark(document.documentElement.dataset.theme === "dark");
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
   const [edit, setEdit] = useState(false),
     [passwordOpen, setPasswordOpen] = useState(false),
     [currentPassword, setCurrentPassword] = useState(""),
@@ -34,6 +45,26 @@ export function Profile({ me, run, busy, notify, refresh }) {
           <h2>{me.name}</h2>
           <p>{me.role}</p>
         </div>
+      </div>
+      <div className="theme-preference">
+        <span>Light Mode</span>
+        <button
+          type="button"
+          className="theme-switch"
+          role="switch"
+          aria-label="Dark Mode"
+          aria-checked={dark}
+          onClick={() => {
+            setTheme(dark ? "light" : "dark");
+            setDark(!dark);
+          }}
+        >
+          <span>
+            <Sun size={16} className="theme-sun" />
+            <Moon size={16} className="theme-moon" />
+          </span>
+        </button>
+        <span>Dark Mode</span>
       </div>
       <dl className="facts">
         <dt>E-mail</dt>

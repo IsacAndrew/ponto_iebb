@@ -1,5 +1,50 @@
 import { test, expect } from "@playwright/test";
 
+for (const role of [
+  "Colaborador",
+  "Professor",
+  "Administração",
+  "Diretoria",
+  "Suporte",
+]) {
+  test(`theme: ${role} can switch and retain their preference`, async ({
+    page,
+    playwright,
+  }, info) => {
+    if (role === "Professor")
+      await page.setViewportSize({ width: 390, height: 844 });
+    const person = await newPerson(playwright, role);
+    await login(page, person.login, "102030");
+    await page.getByRole("button", { name: "Abrir meu perfil" }).click();
+    const control = page.getByRole("switch", { name: "Dark Mode" });
+    await expect(control).not.toBeChecked();
+    await control.focus();
+    await page.keyboard.press("Space");
+    await expect(control).toBeChecked();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await page.reload();
+    await page.getByRole("button", { name: "Abrir meu perfil" }).click();
+    await expect(control).toBeChecked();
+    await page.getByRole("button", { name: "Alterar minha senha" }).click();
+    await expect(page.getByLabel("Senha atual")).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCSS(
+      "color",
+      "rgb(226, 235, 229)",
+    );
+    await page.screenshot({
+      path: info.outputPath("dark-profile.png"),
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "Fechar", exact: true }).click();
+    await page.screenshot({
+      path: info.outputPath("dark-switch.png"),
+      fullPage: true,
+    });
+    await control.click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  });
+}
+
 async function login(page, user = "suporte", password = "e2e-password") {
   await page.clock.setFixedTime(new Date("2026-09-03T10:10:00Z"));
   await page.goto("/");

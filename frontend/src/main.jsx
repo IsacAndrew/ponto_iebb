@@ -4,6 +4,8 @@ import App from "./app";
 import { QRAccess } from "./qr";
 import "./style.css";
 import "./styles/design.css";
+import "./styles/theme.css";
+import "./theme";
 class ErrorBoundary extends React.Component {
   state = { failed: false };
   static getDerivedStateFromError() {
