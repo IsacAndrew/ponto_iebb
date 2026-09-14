@@ -12,7 +12,6 @@ import { api, Field, Password, Button, Modal, Empty, classes } from "../ui";
 
 export function SettingsPage({ run, busy, notify, me }) {
   const [resetOpen, setResetOpen] = useState(false),
-    [resetPassword, setResetPassword] = useState(""),
     [resetConfirmation, setResetConfirmation] = useState("");
   const [file, setFile] = useState(null),
     [geo, setGeo] = useState(null),
@@ -150,7 +149,6 @@ export function SettingsPage({ run, busy, notify, me }) {
               <button
                 className="danger-text database-reset-button"
                 onClick={() => {
-                  setResetPassword("");
                   setResetConfirmation("");
                   setResetOpen(true);
                 }}
@@ -169,10 +167,13 @@ export function SettingsPage({ run, busy, notify, me }) {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              const fields = new FormData(e.currentTarget);
+              const password = String(fields.get("password") || "");
+              const confirmation = String(fields.get("confirmation") || "");
               run(async () => {
                 await api("/system/reset", {
-                  password: resetPassword,
-                  confirmation: resetConfirmation,
+                  password,
+                  confirmation,
                 });
                 location.reload();
               });
@@ -191,12 +192,13 @@ export function SettingsPage({ run, busy, notify, me }) {
             </p>
             <Password
               label="Sua senha"
-              value={resetPassword}
-              onChange={(e) => setResetPassword(e.target.value)}
+              name="password"
+              autoComplete="current-password"
               required
             />
             <Field
               label="Digite APAGAR para confirmar"
+              name="confirmation"
               value={resetConfirmation}
               onChange={(e) => setResetConfirmation(e.target.value)}
               required

@@ -322,3 +322,54 @@ test("calendar is editable and an employee can change their password", async ({
   await login(page, person.login, "changed-browser-password");
   await expect(page.getByRole("heading", { name: "Olá, Ana." })).toBeVisible();
 });
+
+test("reset: rejects wrong password and clears test database with autofilled password", async ({
+  page,
+  playwright,
+}) => {
+  const person = await newPerson(playwright);
+  await login(page);
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Configurações", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Apagar dados do sistema", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog");
+  const password = dialog.getByLabel("Sua senha", { exact: true });
+  const submit = dialog.getByRole("button", {
+    name: "Apagar dados definitivamente",
+  });
+  await password.fill("wrong-password");
+  await expect(submit).toBeDisabled();
+  await dialog.getByLabel("Digite APAGAR para confirmar").fill("APAGAR");
+  const denied = page.waitForResponse((r) =>
+    r.url().endsWith("/api/system/reset"),
+  );
+  await submit.click();
+  expect((await denied).status()).toBe(403);
+  await expect(dialog.getByRole("alert")).toContainText("Senha incorreta");
+  // Simulate a password manager updating the DOM without a React change event.
+  await password.evaluate((input) => {
+    input.value = "e2e-password";
+  });
+  const cleared = page.waitForResponse((r) =>
+    r.url().endsWith("/api/system/reset"),
+  );
+  await submit.click();
+  expect((await cleared).status()).toBe(200);
+  await expect(
+    page.getByRole("button", { name: "Entrar na minha conta" }),
+  ).toBeVisible();
+  await login(page);
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Pessoas", exact: true })
+    .click();
+  await expect(page.getByText(person.login, { exact: true })).toHaveCount(0);
+  const people = await page.request.get("/api/people");
+  const remaining = await people.json();
+  expect(remaining).toHaveLength(1);
+  expect(remaining[0].login).toBe("suporte");
+});
