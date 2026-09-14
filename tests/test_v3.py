@@ -12,6 +12,38 @@ from backend.main import app
 from backend.security import verify
 
 
+def test_theme_is_saved_per_account_and_validated(client):
+    pid = add_person(login="theme-other")
+    assert (
+        client.put(
+            "/api/profile/theme", json={"theme": "dark", "person_id": pid}
+        ).status_code
+        == 200
+    )
+    assert client.get("/api/me").json()["user"]["theme"] == "dark"
+    with transaction() as db:
+        assert (db.get(Person, pid).details or {}).get("theme") is None
+    assert (
+        client.put("/api/profile/theme", json={"theme": "invalid"}).status_code == 400
+    )
+    with TestClient(app) as other:
+        other.headers["X-Ponto"] = "1"
+        assert (
+            other.put("/api/profile/theme", json={"theme": "light"}).status_code == 401
+        )
+        other.post(
+            "/api/login", json={"login": "theme-other", "password": "definitiva1"}
+        )
+        assert other.get("/api/me").json()["user"]["theme"] == "light"
+        other.post("/api/logout", json={})
+        other.post("/api/login", json={"login": "suporte", "password": "definitiva1"})
+        assert other.get("/api/me").json()["user"]["theme"] == "dark"
+        assert (
+            other.put("/api/profile/theme", json={"theme": "light"}).status_code == 200
+        )
+        assert other.get("/api/me").json()["user"]["theme"] == "light"
+
+
 def test_resolved_occurrence_does_not_reappear(client):
     with transaction() as db:
         db.add(

@@ -10,6 +10,7 @@ for (const role of [
   test(`theme: ${role} can switch and retain their preference`, async ({
     page,
     playwright,
+    browser,
   }, info) => {
     if (role === "Professor")
       await page.setViewportSize({ width: 390, height: 844 });
@@ -22,6 +23,16 @@ for (const role of [
     await page.keyboard.press("Space");
     await expect(control).toBeChecked();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    const otherDevice = await browser.newContext({
+      storageState: { cookies: await page.context().cookies(), origins: [] },
+    });
+    const otherPage = await otherDevice.newPage();
+    await otherPage.goto("http://127.0.0.1:5051/");
+    await expect(otherPage.locator("html")).toHaveAttribute(
+      "data-theme",
+      "dark",
+    );
+    await otherDevice.close();
     await page.reload();
     await page.getByRole("button", { name: "Abrir meu perfil" }).click();
     await expect(control).toBeChecked();

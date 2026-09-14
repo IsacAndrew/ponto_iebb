@@ -102,5 +102,6 @@ def public(person, active=False):
         hired=person.hired,
         terminated=person.terminated,
         details=person.details,
+        theme="dark" if (person.details or {}).get("theme") == "dark" else "light",
         temporary=person.temporary,
     )

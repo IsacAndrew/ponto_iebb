@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, Button } from "./ui";
+import { applyTheme } from "./theme";
 import { locate, warmLocation } from "./location";
 export function QRAccess() {
   const token = decodeURIComponent(location.pathname.slice(3)),
@@ -15,6 +16,8 @@ export function QRAccess() {
   const load = async () => {
     try {
       const data = await api("/qr/" + token);
+      const account = await api("/me");
+      applyTheme(account.user.theme);
       setState(data);
       offset.current = new Date(data.now).getTime() - Date.now();
       if (data.location_required !== false) warmLocation();

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { Moon, Sun } from "lucide-react";
-import { setTheme } from "../theme";
 
 import {
   api,
@@ -14,16 +13,8 @@ import {
   phoneFormat,
 } from "../ui";
 
-export function Profile({ me, run, busy, notify, refresh }) {
-  const [dark, setDark] = useState(
-    document.documentElement.dataset.theme === "dark",
-  );
-  useEffect(() => {
-    const sync = () =>
-      setDark(document.documentElement.dataset.theme === "dark");
-    window.addEventListener("storage", sync);
-    return () => window.removeEventListener("storage", sync);
-  }, []);
+export function Profile({ me, run, busy, notify, refresh, onThemeChange }) {
+  const dark = me.theme === "dark";
   const [edit, setEdit] = useState(false),
     [passwordOpen, setPasswordOpen] = useState(false),
     [currentPassword, setCurrentPassword] = useState(""),
@@ -54,10 +45,17 @@ export function Profile({ me, run, busy, notify, refresh }) {
           role="switch"
           aria-label="Dark Mode"
           aria-checked={dark}
-          onClick={() => {
-            setTheme(dark ? "light" : "dark");
-            setDark(!dark);
-          }}
+          disabled={busy}
+          onClick={() =>
+            run(async () => {
+              const user = await api(
+                "/profile/theme",
+                { theme: dark ? "light" : "dark" },
+                "PUT",
+              );
+              onThemeChange(user);
+            })
+          }
         >
           <span>
             <Sun size={16} className="theme-sun" />

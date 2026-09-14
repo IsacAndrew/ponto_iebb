@@ -257,3 +257,14 @@ def reveal(request: Request, data: dict = Body(...)):
         person = current(db, request)
         confirm(person, data.get("password", ""))
         return {"login": person.login}
+
+
+@router.put("/api/profile/theme")
+def theme(request: Request, data: dict = Body(...)):
+    with transaction() as db:
+        person = current(db, request, True, True)
+        value = data.get("theme")
+        if value not in ("light", "dark"):
+            fail("Escolha o tema claro ou escuro.")
+        person.details = {**(person.details or {}), "theme": value}
+        return public(person, True)

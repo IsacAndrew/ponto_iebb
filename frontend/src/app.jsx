@@ -26,6 +26,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { api, SuccessToast } from "./ui";
+import { applyTheme } from "./theme";
 import { Login, AccessChoice } from "./components/auth";
 import { Punch } from "./components/punch";
 const loadPage = (path, name) =>
@@ -68,6 +69,9 @@ export default function App() {
     activeRuns = useRef(0),
     refreshing = useRef(false),
     timer = useRef();
+  useEffect(() => {
+    applyTheme(me?.theme);
+  }, [me?.id, me?.theme]);
   const notify = useCallback((text) => {
     setToast(text);
     clearTimeout(timer.current);
@@ -242,7 +246,7 @@ export default function App() {
         ...(full ? [["Configurações", Settings]] : []),
       ]
     : [];
-  const ctx = { me, run, busy, notify, refresh };
+  const ctx = { me, run, busy, notify, refresh, onThemeChange: setMe };
   let content;
   if (page === "Ponto" && me.role !== "Diretoria")
     content = <Punch {...ctx} initial={initial} onNavigate={change} />;
