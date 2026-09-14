@@ -1084,7 +1084,13 @@ def test_synthetic_storage_data_is_bounded_and_removed(client, monkeypatch):
         assert all(row.data["synthetic"] for row in rows)
         assert session.get(Person, pid) is not None
     assert client.get("/api/system/storage").json()["test_data"] is True
-    assert client.post("/api/system/storage-test", json={}).status_code == 409
+    assert client.post("/api/system/storage-test", json={}).status_code == 200
+    with transaction() as session:
+        rows = list(
+            session.scalars(select(Setting).where(Setting.key.like("storage-test:%")))
+        )
+        assert sum(len(row.data["payload"]) for row in rows) == size
+        assert session.get(Person, pid) is not None
     assert (
         client.post(
             "/api/system/reset",

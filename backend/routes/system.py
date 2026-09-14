@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 from fastapi.responses import Response as RawResponse
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 
 from ..db import Day, Person, Setting, audit, reading, today, transaction
 from ..rules import ADMIN, fail, valid_date
@@ -133,6 +133,14 @@ def storage(request: Request):
             )
         )
         return {
+            "connection_label": (
+                "Conexão ativa: PostgreSQL (Supabase)"
+                if db.bind.dialect.name == "postgresql"
+                and (db.bind.url.host or "").endswith((".supabase.co", ".supabase.com"))
+                else "Conexão ativa: PostgreSQL"
+                if db.bind.dialect.name == "postgresql"
+                else "Banco local: SQLite"
+            ),
             "used_bytes": used,
             "limit_bytes": limit,
             "percent": round(min(100, used * 100 / limit), 2),
@@ -145,13 +153,6 @@ def create_storage_test(request: Request):
     with transaction() as db:
         actor = current(db, request)
         require(actor, ["Suporte"])
-        if db.scalar(
-            select(Setting.key).where(Setting.key.like("storage-test:%")).limit(1)
-        ):
-            fail(
-                "Os dados de teste já foram criados. Faça a limpeza antes de gerar novamente.",
-                409,
-            )
         limit = max(1, int(os.getenv("DB_STORAGE_LIMIT_MB", "500"))) * 1024 * 1024
         target = math.ceil(limit * 0.012)
         if target > 32 * 1024 * 1024:
@@ -159,6 +160,8 @@ def create_storage_test(request: Request):
                 "Este teste é limitado a 32 MB. O limite configurado do banco é alto demais para simular 1%."
             )
         remaining = target
+        # Replace only the synthetic batch; repeated clicks do not accumulate data.
+        db.execute(delete(Setting).where(Setting.key.like("storage-test:%")))
         index = 0
         while remaining:
             size = min(65536, remaining)

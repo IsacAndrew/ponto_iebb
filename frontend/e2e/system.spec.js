@@ -333,6 +333,23 @@ test("reset: rejects wrong password and clears test database with autofilled pas
     .getByRole("navigation")
     .getByRole("button", { name: "Configurações", exact: true })
     .click();
+  await expect(
+    page.getByText("Banco local: SQLite", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Gerar dados de teste (+1%)", exact: true })
+    .click();
+  const regenerate = page.getByRole("button", {
+    name: "Recriar dados de teste (+1%)",
+    exact: true,
+  });
+  await expect(regenerate).toBeEnabled();
+  const regenerated = page.waitForResponse((r) =>
+    r.url().endsWith("/api/system/storage-test"),
+  );
+  await regenerate.click();
+  expect((await regenerated).status()).toBe(200);
+  await expect(regenerate).toBeEnabled();
   await page
     .getByRole("button", { name: "Apagar dados do sistema", exact: true })
     .click();
@@ -342,8 +359,13 @@ test("reset: rejects wrong password and clears test database with autofilled pas
     name: "Apagar dados definitivamente",
   });
   await password.fill("wrong-password");
-  await expect(submit).toBeDisabled();
-  await dialog.getByLabel("Digite APAGAR para confirmar").fill("APAGAR");
+  await expect(submit).toBeEnabled();
+  await dialog.getByLabel("Repita sua senha").fill("different-password");
+  await submit.click();
+  await expect(dialog.getByRole("alert")).toContainText(
+    "As senhas não conferem",
+  );
+  await dialog.getByLabel("Repita sua senha").fill("wrong-password");
   const denied = page.waitForResponse((r) =>
     r.url().endsWith("/api/system/reset"),
   );
@@ -352,6 +374,9 @@ test("reset: rejects wrong password and clears test database with autofilled pas
   await expect(dialog.getByRole("alert")).toContainText("Senha incorreta");
   // Simulate a password manager updating the DOM without a React change event.
   await password.evaluate((input) => {
+    input.value = "e2e-password";
+  });
+  await dialog.getByLabel("Repita sua senha").evaluate((input) => {
     input.value = "e2e-password";
   });
   const cleared = page.waitForResponse((r) =>

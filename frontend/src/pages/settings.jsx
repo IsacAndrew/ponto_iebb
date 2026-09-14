@@ -11,8 +11,7 @@ import {
 import { api, Field, Password, Button, Modal, Empty, classes } from "../ui";
 
 export function SettingsPage({ run, busy, notify, me }) {
-  const [resetOpen, setResetOpen] = useState(false),
-    [resetConfirmation, setResetConfirmation] = useState("");
+  const [resetOpen, setResetOpen] = useState(false);
   const [file, setFile] = useState(null),
     [geo, setGeo] = useState(null),
     [storage, setStorage] = useState(null),
@@ -121,6 +120,7 @@ export function SettingsPage({ run, busy, notify, me }) {
           <div>
             <strong>{storage.percent}%</strong>
             <p>Armazenamento do banco</p>
+            <p className="muted">{storage.connection_label}</p>
             <small>
               {(storage.used_bytes / 1048576).toFixed(1)} MB de{" "}
               {(storage.limit_bytes / 1048576).toFixed(0)} MB
@@ -129,7 +129,6 @@ export function SettingsPage({ run, busy, notify, me }) {
               <Button
                 className="secondary database-reset-button"
                 busy={busy}
-                disabled={storage.test_data}
                 onClick={() =>
                   run(async () => {
                     const result = await api("/system/storage-test", {});
@@ -141,7 +140,7 @@ export function SettingsPage({ run, busy, notify, me }) {
                 }
               >
                 {storage.test_data
-                  ? "Dados de teste criados"
+                  ? "Recriar dados de teste (+1%)"
                   : "Gerar dados de teste (+1%)"}
               </Button>
             )}
@@ -149,7 +148,6 @@ export function SettingsPage({ run, busy, notify, me }) {
               <button
                 className="danger-text database-reset-button"
                 onClick={() => {
-                  setResetConfirmation("");
                   setResetOpen(true);
                 }}
               >
@@ -171,9 +169,11 @@ export function SettingsPage({ run, busy, notify, me }) {
               const password = String(fields.get("password") || "");
               const confirmation = String(fields.get("confirmation") || "");
               run(async () => {
+                if (password !== confirmation)
+                  throw new Error("As senhas não conferem.");
                 await api("/system/reset", {
                   password,
-                  confirmation,
+                  confirmation: "APAGAR",
                 });
                 location.reload();
               });
@@ -196,18 +196,13 @@ export function SettingsPage({ run, busy, notify, me }) {
               autoComplete="current-password"
               required
             />
-            <Field
-              label="Digite APAGAR para confirmar"
+            <Password
+              label="Repita sua senha"
               name="confirmation"
-              value={resetConfirmation}
-              onChange={(e) => setResetConfirmation(e.target.value)}
+              autoComplete="current-password"
               required
             />
-            <Button
-              className="primary"
-              busy={busy}
-              disabled={resetConfirmation !== "APAGAR"}
-            >
+            <Button className="primary" busy={busy}>
               Apagar dados definitivamente
             </Button>
           </form>
