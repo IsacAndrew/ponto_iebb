@@ -17,37 +17,6 @@ Novas contas e redefinições usam a senha padrão `102030`, por escolha da esco
 A troca é opcional em Meu perfil; uma nova senha deve ter de 8 a 128 caracteres.
 Contas existentes mantêm suas senhas e podem acessar o ponto sem troca obrigatória.
 
-## Executar no Linux
-
-Requisitos: Python 3.12 ou superior e Node.js 22.12 ou superior. Em uma instalação
-Fedora, os pacotes podem ser instalados com `sudo dnf install python3 nodejs npm`.
-
-Na pasta do projeto:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env
-```
-
-Edite `.env` e defina `BOOTSTRAP_PASSWORD` com uma senha privada para o primeiro acesso.
-O login inicial é `suporte`. Essa configuração só cria uma conta se o banco estiver
-vazio; nunca substitui a senha de uma conta existente. A localização da escola deve
-ser conferida em Configurações antes de liberar marcações.
-
-```bash
-cd frontend
-npm ci
-npm run build
-cd ..
-python start.py
-```
-
-Abra `http://127.0.0.1:5050`. O banco local fica em `data/ponto.db`, ignorado pelo Git.
-Para desenvolvimento da interface, execute `npm run dev` em outro terminal dentro
-de `frontend`; o Vite encaminha `/api` ao backend na porta 5050.
-
 ## Organização
 
 ```text
@@ -71,60 +40,6 @@ frontend/src/
 tests/              testes das regras, permissões e migrações
 frontend/e2e/       testes em navegador com banco descartável
 ```
-
-## Banco existente e migração
-
-A revisão `0001` aceita o esquema da versão 2.0 e preserva seus registros. Antes de
-adotar um banco existente, mantenha um backup externo e valide em uma cópia. A migração
-confere a presença das colunas esperadas, cria tabelas ausentes e registra a revisão.
-Ela é executada na inicialização e pode ser repetida. Não há limpeza automática.
-Um esquema diferente do esperado provoca um erro explícito para análise.
-
-```bash
-python -m backend.backup backups/ponto-antes-da-atualizacao.zip
-alembic current
-```
-
-O ZIP contém dados privados e hashes de credenciais; guarde-o fora do repositório.
-Para PostgreSQL, prefira também um backup nativo do provedor. O utilitário ZIP não
-implementa restauração automática; restauração e ensaio de recuperação exigem uma
-cópia isolada. Não há downgrade destrutivo automático da revisão inicial.
-
-## Verificações
-
-```bash
-ruff check backend migrations tests
-ruff format --check backend migrations tests
-python -m pytest -q
-cd frontend
-npm run format:check
-npm run build
-npx playwright install chromium
-npm run test:e2e
-```
-
-Os testes Python criam um SQLite descartável. Para testar PostgreSQL, use um banco
-exclusivo chamado `ponto_test` e forneça `PONTO_TEST_POSTGRES`. Esse banco terá suas
-tabelas de aplicação apagadas durante os testes. `DATABASE_URL` de produção nunca é
-usado pela suíte. Os testes de navegador iniciam seu próprio servidor na porta 5051.
-
-O GitHub Actions executa backend em SQLite/PostgreSQL, compilação e testes de navegador.
-
-## GitHub e Render
-
-O serviço é construído pelo `Dockerfile`: o Node compila a interface e a imagem final
-executa apenas Python. O arquivo `render.yaml` descreve o serviço e suas variáveis.
-
-No serviço existente do Render, confira:
-
-1. Repositório `IsacAndrew/ponto_iebb`, branch `main`, ambiente Docker.
-2. `DATABASE_URL` com PostgreSQL e as credenciais privadas já configuradas no painel.
-3. `BOOTSTRAP_PASSWORD` se o banco estiver vazio; SMTP se quiser recuperar acesso por e-mail.
-4. Health check `/health`; a resposta inclui `version: 3.0.0` e verifica o banco.
-5. Deploy automático após os testes de CI, se essa opção estiver disponível no serviço.
-
-Um push não confirma por si só que o Render publicou a aplicação. Consulte o status
-do deploy e `/health` para confirmar. Nenhum segredo deve ser colocado no GitHub.
 
 ## Comportamentos e limites conhecidos
 
